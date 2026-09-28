@@ -79,7 +79,8 @@ The current image-pull path and bundle/runtime paths are not yet a single accept
 ## Documentation
 
 - [User Manual](USER-MANUAL.md)
-- [Specifications](SPECIFICATIONS.md)
+- [Project Specifications](PROJECT-SPECIFICATIONS.md)
+- [Project Record](PROJECT-RECORD.md)
 - [Features](FEATURES.md)
 - [Benefits](BENEFITS.md)
 - [Competitive Objectives](COMPETITIVE-OBJECTIVES.md)
