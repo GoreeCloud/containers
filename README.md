@@ -1,85 +1,76 @@
 # GoreeCloud Containers
 
-GoreeCloud Containers is the first-party GoreeCloud container-engine and workload-platform project. It is being developed as an OCI-compatible engine that preserves interoperability with mature OCI standards and runtimes while keeping GoreeCloud ownership of the engine contract, CLI, state model, policy, lifecycle, and future platform integrations.
+GoreeCloud Containers is GoreeCloud's first-party OCI-compatible container engine and workload-platform project.
 
-## Development status
+## Current lifecycle
 
-**Lifecycle:** Development  
-**Version:** `0.1.0-dev.2`  
-**Supported development platform:** Linux  
-**Production replacement:** No
+**Development** — version `0.1.0-dev.2`.
 
-The current source includes a controlled OCI runtime lifecycle foundation plus a Development image/content pipeline that can retrieve supported single-image OCI/Docker manifests, image configurations, and layers; verify expected SHA-256 digests; store verified content in a bounded content-addressed store; verify uncompressed layer diff IDs; and construct a new root filesystem using a restricted extractor. Deterministic fixture tests validate this source boundary.
+Docker remains the current GoreeCloud production container runtime until a separately validated migration changes that authoritative operational state.
 
-**Real external-registry acceptance, registry credential authentication, image-index selection, real `crun`/`runc` lifecycle acceptance, OCI conformance, rootless acceptance, production deployment, and Docker replacement are not established.** Docker remains the current GoreeCloud production container runtime until a separately validated migration changes that operational state.
+The accepted source provides a controlled OCI runtime lifecycle foundation and a Development image/content pipeline. It does **not** establish full OCI conformance, accepted real crun/runc execution, rootless acceptance, durable engine state, production deployment, Stable qualification, or Docker replacement.
 
-## Implemented Development foundation
+## Project authority
 
-- Rust 2024 workspace pinned to Rust 1.85.0.
-- Validated container identifiers and explicit lifecycle-state transitions.
-- Deterministic in-memory Development state store.
-- Typed minimal Linux OCI `config.json` generation targeting OCI Runtime Specification 1.3.0.
-- Fail-closed bundle initialization requiring an absolute existing bundle directory, existing non-symlink `rootfs/`, and no-overwrite `config.json` creation.
-- `crun` and `runc` runtime identities, runtime probing, and controlled `create`, `start`, `state`, and `delete` execution using explicit runtime selection.
-- Direct runtime process spawning without a shell, executable/bundle/config validation, bounded output, timeout handling, and non-zero-exit propagation.
-- Strict SHA-256 digest parsing and verification before image content acceptance.
-- Bounded content-addressed storage with safe staging/publication and existing-blob re-verification.
-- Development OCI/Docker v2 single-manifest retrieval with bounded anonymous Bearer-token handling and secure transport rules.
-- Manifest, image-config, compressed-layer, and uncompressed diff-ID verification.
-- Supported tar/gzip layer extraction with path traversal, symlink-parent, entry-size, entry-count, and unpacked-size protections plus OCI whiteout handling.
-- Staged construction of a new rootfs target; existing rootfs targets are not merged into.
-- Development CLI commands for local verified content ingest and Development image pull/rootfs construction.
-- Deterministic fixture-registry, image-content, rootfs, fake-runtime, timeout, and failure-path tests.
-- GitHub Actions CI for formatting, Clippy, tests, and build validation.
-- GoreeCloud Platform Contract v0.2 declaration and conformance validation.
+- [PROJECT-SPECIFICATIONS.md](./PROJECT-SPECIFICATIONS.md) — normative product, architecture, interoperability, security, platform, migration, and acceptance requirements.
+- [PROJECT-RECORD.md](./PROJECT-RECORD.md) — significant project history, accepted milestones, draft-candidate boundaries, and evidence.
+- [IMPLEMENTED-FEATURES.md](./IMPLEMENTED-FEATURES.md) — accepted implemented-feature state.
+- [PLANNED-FEATURES.md](./PLANNED-FEATURES.md) — planned capability and obligation state.
+- [CHANGELOGS.md](./CHANGELOGS.md) — repository-native release/change history.
 
-## Build and inspect the Development CLI
+After project-record migration acceptance and default-branch readback, GitHub is the authoritative location for project specifications and project history.
+
+## Accepted Development foundation
+
+Current accepted capabilities include:
+
+- Rust 2024 workspace pinned to the repository toolchain;
+- validated container identifiers and lifecycle transitions;
+- typed minimal OCI Linux configuration generation;
+- controlled bundle initialization;
+- bounded explicit crun/runc process-execution primitives;
+- SHA-256 image-content verification;
+- bounded content-addressed storage;
+- supported single-manifest OCI/Docker registry retrieval;
+- image configuration and supported layer verification;
+- diff-ID verification;
+- restricted staged rootfs construction;
+- Development image ingest/pull CLI paths;
+- deterministic fixture-registry and fake-runtime tests;
+- Rust CI and Platform Contract validation.
+
+## Important acceptance boundaries
+
+The current repository does not establish:
+
+- reusable registry credential handling;
+- multi-platform image-index selection;
+- signature/provenance/SBOM trust policy;
+- accepted external-registry interoperability;
+- accepted real crun/runc lifecycle behavior or complete OCI conformance;
+- accepted rootless execution;
+- persistent authoritative engine metadata and recovery;
+- production networking/volume management;
+- Compose production compatibility;
+- production deployment or Docker replacement.
+
+Draft PR #4 contains later Development candidate work and remains unmerged.
+
+## Development commands
 
 ```bash
 cargo build --workspace
+cargo test --workspace
 cargo run -p goree -- version
 cargo run -p goree -- container validate-id example-container
 cargo run -p goree -- runtime probe crun
 ```
 
-### Verify and ingest a local content fixture
+Development image and runtime commands are documented in the user manual and implementation documentation. They are not a stable production CLI contract.
 
-```bash
-cargo run -p goree -- image ingest \
-  sha256:<64-lowercase-hex> \
-  /absolute/path/to/blob \
-  /absolute/path/to/content-store
-```
-
-### Pull a Development image and construct a new rootfs
-
-```bash
-cargo run -p goree -- image pull \
-  https://registry.example \
-  team/example \
-  v1 \
-  /absolute/path/to/content-store \
-  /absolute/path/to/new-rootfs
-```
-
-`image pull` is a Development interface, not a production image manager. The rootfs target must be a new absolute path. Public/non-loopback registry transport must use HTTPS. Registry user/password credential authentication and image-index/multi-platform selection are not implemented. Symbolic-link and hard-link archive entries are intentionally unsupported by the current restricted extractor.
-
-### Exercise low-level OCI lifecycle operations
-
-```bash
-cargo run -p goree -- bundle init /absolute/path/to/bundle /bin/echo hello
-cargo run -p goree -- runtime create crun /usr/bin/crun example /absolute/path/to/bundle
-cargo run -p goree -- runtime start crun /usr/bin/crun example
-cargo run -p goree -- runtime state crun /usr/bin/crun example
-cargo run -p goree -- runtime delete crun /usr/bin/crun example
-```
-
-The current image-pull path and bundle/runtime paths are not yet a single accepted high-level `run` workflow. Automated runtime lifecycle evidence still uses a fake runtime and must not be treated as real `crun`/`runc` acceptance.
-
-## Documentation
+## Additional documentation
 
 - [User Manual](USER-MANUAL.md)
-- [Specifications](SPECIFICATIONS.md)
 - [Features](FEATURES.md)
 - [Benefits](BENEFITS.md)
 - [Competitive Objectives](COMPETITIVE-OBJECTIVES.md)
@@ -90,10 +81,6 @@ The current image-pull path and bundle/runtime paths are not yet a single accept
 - [Recovery](docs/RECOVERY.md)
 - [Platform Conformance](docs/PLATFORM_CONFORMANCE.md)
 
-## Next Phase 1 evidence gates
-
-The next required evidence includes real external-registry interoperability testing, a controlled image-to-bundle integration path, real `crun`/`runc` lifecycle acceptance, and rootless execution/resource-boundary acceptance. These gates remain separate from the source-level fixture tests completed in this version.
-
 ## License
 
-Original GoreeCloud Containers source is licensed under the Apache License 2.0. External runtimes and dependencies retain their own licenses and obligations.
+Original GoreeCloud Containers source is licensed under the Apache License 2.0. External runtimes and dependencies retain their own governing licenses and obligations.
