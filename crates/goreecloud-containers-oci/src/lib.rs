@@ -349,21 +349,27 @@ pub fn initialize_linux_bundle(
         }
     }
 
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&config_path)
-        .map_err(|source| {
-            if source.kind() == io::ErrorKind::AlreadyExists {
-                OciConfigError::ConfigAlreadyExists(config_path.clone())
-            } else {
-                OciConfigError::Io {
-                    operation: "create OCI configuration",
-                    path: config_path.clone(),
-                    source,
-                }
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    // OCI configurations may contain process environment values. Never expose
+    // them through a permissive host umask when creating a new bundle.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+
+    let mut file = options.open(&config_path).map_err(|source| {
+        if source.kind() == io::ErrorKind::AlreadyExists {
+            OciConfigError::ConfigAlreadyExists(config_path.clone())
+        } else {
+            OciConfigError::Io {
+                operation: "create OCI configuration",
+                path: config_path.clone(),
+                source,
             }
-        })?;
+        }
+    })?;
 
     file.write_all(config.to_json_pretty().as_bytes())
         .map_err(|source| OciConfigError::Io {
@@ -454,6 +460,30 @@ mod tests {
             OciConfig::minimal_linux(Vec::new()),
             Err(OciConfigError::MissingProcessArgs)
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn newly_created_bundle_config_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = temporary_directory("private-config");
+        let rootfs = directory.join(DEFAULT_ROOTFS_DIRECTORY);
+        fs::create_dir_all(&rootfs).expect("rootfs fixture should exist");
+
+        let config = OciConfig::minimal_linux(vec!["/bin/true".to_owned()])
+            .expect("minimal OCI config should be valid");
+        let initialized =
+            initialize_linux_bundle(&directory, &config).expect("OCI bundle should initialize");
+
+        let permissions = fs::metadata(&initialized.config_path)
+            .expect("config metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(permissions, 0o600);
+
+        fs::remove_dir_all(&directory).expect("test directory should be removable");
     }
 
     #[test]
