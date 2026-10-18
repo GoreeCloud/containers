@@ -77,8 +77,8 @@ fn run_bundle(mut args: impl Iterator<Item = String>) -> Result<(), String> {
             let process_args: Vec<String> = args.collect();
             let config = OciConfig::minimal_rootless_linux(process_args, host_uid, host_gid)
                 .map_err(|error| error.to_string())?;
-            let initialized = initialize_linux_bundle(&bundle, &config)
-                .map_err(|error| error.to_string())?;
+            let initialized =
+                initialize_linux_bundle(&bundle, &config).map_err(|error| error.to_string())?;
             println!("bundle: {}", initialized.bundle_path.display());
             println!("rootfs: {}", initialized.rootfs_path.display());
             println!("config: {}", initialized.config_path.display());
