@@ -381,8 +381,14 @@ pub fn initialize_linux_bundle(
     // These fields are public: validate again even when a caller bypasses the
     // checked constructors by changing a configuration after construction.
     OciProcess::minimal(config.process.args.clone())?;
-    config.process.clone().with_env(config.process.env.clone())?;
-    config.process.clone().with_cwd(config.process.cwd.clone())?;
+    config
+        .process
+        .clone()
+        .with_env(config.process.env.clone())?;
+    config
+        .process
+        .clone()
+        .with_cwd(config.process.cwd.clone())?;
 
     let bundle_metadata =
         fs::symlink_metadata(bundle_path).map_err(|source| OciConfigError::Io {
@@ -554,10 +560,9 @@ mod tests {
     #[test]
     fn rejects_unsafe_oci_root_without_creating_config() {
         let directory = temporary_directory("unsafe-root");
-        fs::create_dir_all(directory.join(DEFAULT_ROOTFS_DIRECTORY))
-            .expect("create test rootfs");
-        let mut config = OciConfig::minimal_linux(vec!["/bin/true".to_owned()])
-            .expect("valid minimal config");
+        fs::create_dir_all(directory.join(DEFAULT_ROOTFS_DIRECTORY)).expect("create test rootfs");
+        let mut config =
+            OciConfig::minimal_linux(vec!["/bin/true".to_owned()]).expect("valid minimal config");
         config.root.path = "../outside".to_owned();
         assert!(matches!(
             initialize_linux_bundle(&directory, &config),
@@ -570,10 +575,9 @@ mod tests {
     #[test]
     fn rejects_invalid_mutable_process_fields_before_publication() {
         let directory = temporary_directory("invalid-process-fields");
-        fs::create_dir_all(directory.join(DEFAULT_ROOTFS_DIRECTORY))
-            .expect("create test rootfs");
-        let base = OciConfig::minimal_linux(vec!["/bin/true".to_owned()])
-            .expect("valid minimal config");
+        fs::create_dir_all(directory.join(DEFAULT_ROOTFS_DIRECTORY)).expect("create test rootfs");
+        let base =
+            OciConfig::minimal_linux(vec!["/bin/true".to_owned()]).expect("valid minimal config");
 
         let mut invalid = base.clone();
         invalid.process.args = vec!["/bin/true\0extra".to_owned()];
