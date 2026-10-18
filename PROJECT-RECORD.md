@@ -7,6 +7,12 @@
 **Authority:** Repository-local project record
 **Last Updated:** 2026-10-18
 
+## 2026-10-18 — Isolated timeout descendant-ownership gap reproduced
+
+The accepted Development Unix `RuntimeExecutor` timeout path terminates and waits for the directly spawned runtime process, but does not own or reap arbitrary descendants. An isolated test on the non-root Debian VPS launched a disposable fake-runtime process that created a bounded short-lived descendant, emitted `timeout-diagnostic` to stderr, and then blocked. A 200-ms executor timeout returned `TimedOut` with the stderr diagnostic preserved; the independent descendant wrote a marker afterward and ended on its own. The focused test and full local offline Rust workspace tests passed. **This demonstrates that a direct-process timeout does not prove descendant cleanup**, and does not invalidate the previously accepted direct real-`runc` lifecycle smoke.
+
+Blind process-group termination would risk killing an OCI container init deliberately left alive by a successful `create`. Remaining CONTAINERS-016 acceptance therefore requires runtime- and container-ID-scoped ownership tracking, bounded OCI state reconciliation, cleanup only when ownership is proven, safe retry/error reporting, and isolation tests against unrelated workloads. No Docker lifecycle action was performed. The test is not evidence of production readiness.
+
 ## 2026-10-18 — Bounded runtime capture accepted; direct no-wrapper OCI lifecycle verified
 
 PR #19 was squash-merged into Development `main` as `f8fa6ff32322820416f05cff07e29452ae4520b1`. The Unix runtime executor now avoids unbounded output-reader joins when OCI descendants retain pipe descriptors. For OCI `create`, it captures limited stderr diagnostics through a nonblocking Unix datagram channel instead of discarding errors or leaving a SIGPIPE-prone ordinary pipe attached to a stopped container. Additional tests cover descendants retaining descriptors, post-create writes, error diagnostics, poll deadlines, oversized diagnostic datagrams, and capture truncation. Exact-head Rust CI `39098626635` and post-merge Rust CI `39099202111` passed formatting, Clippy, workspace tests and build. The accepted runtime source blob is `994fc3fd2a512dc118fabbd746b7d61bae6270a7`.
