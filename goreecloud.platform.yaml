@@ -4,7 +4,7 @@ component:
   type: application
   id: goreecloud-containers
   product_name: GoreeCloud Containers
-  repository: GoreeCloud/goreecloud-containers
+  repository: GoreeCloud/containers
 
 lifecycle: development
 version: 0.1.0-dev.2
@@ -151,7 +151,7 @@ conformance:
   validated_at: null
   evidence:
     - README.md
-    - SPECIFICATIONS.md
+    - PROJECT-SPECIFICATIONS.md
     - FEATURES.md
     - USER-MANUAL.md
     - docs/ARCHITECTURE.md
