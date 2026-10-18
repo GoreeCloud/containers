@@ -1,5 +1,12 @@
 # GoreeCloud Containers — Changelogs
 
+## 2026-10-18 — Bounded OCI capture and direct rootless CLI lifecycle
+
+- PR #19 merged into Development `main` as `f8fa6ff32322820416f05cff07e29452ae4520b1`; Rust exact-head CI `39098626635` and post-merge CI `39099202111` succeeded.
+- Replaced unbounded Unix capture-thread joins with bounded nonblocking stdout/stderr draining. OCI `create` error diagnostics use bounded Unix datagrams, protecting stopped init processes from an ordinary inherited pipe's SIGPIPE and preserving useful errors.
+- Passed two explicit opt-in **direct `/usr/bin/runc`** lifecycle runs on the isolated, non-root Debian Development VPS, without the earlier test-only runtime wrapper. Both proved invalid-create diagnostics, `create → state → start → state → delete`, rootless identity, procfs, proof-of-work marker, and isolated cleanup.
+- Still Development only. Complete OCI conformance, engine state persistence/recovery, networking, cgroup/resource isolation, Compose compatibility, all runtime failure cases and production Docker migration are **not accepted**.
+
 ## 2026-10-17 — Rootless procfs mount repair and isolated real-runc smoke
 
 - PR #16 was squash-merged into `main` as `94ae8f8ca1dfd9de57ee0e95be6cfe3ef9152ca9`; exact-head Rust CI `39091756467` and post-merge Rust CI `39091834775` passed.

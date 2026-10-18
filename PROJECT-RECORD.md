@@ -5,7 +5,15 @@
 **Project:** GoreeCloud Containers
 **Repository:** GoreeCloud/containers
 **Authority:** Repository-local project record
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-18
+
+## 2026-10-18 — Bounded runtime capture accepted; direct no-wrapper OCI lifecycle verified
+
+PR #19 was squash-merged into Development `main` as `f8fa6ff32322820416f05cff07e29452ae4520b1`. The Unix runtime executor now avoids unbounded output-reader joins when OCI descendants retain pipe descriptors. For OCI `create`, it captures limited stderr diagnostics through a nonblocking Unix datagram channel instead of discarding errors or leaving a SIGPIPE-prone ordinary pipe attached to a stopped container. Additional tests cover descendants retaining descriptors, post-create writes, error diagnostics, poll deadlines, oversized diagnostic datagrams, and capture truncation. Exact-head Rust CI `39098626635` and post-merge Rust CI `39099202111` passed formatting, Clippy, workspace tests and build. The accepted runtime source blob is `994fc3fd2a512dc118fabbd746b7d61bae6270a7`.
+
+An isolated non-root Debian VPS Development checkout was synchronized to PR #19 head `63649e36a6598e4fe7d262a571547d0537b4f3d1` and the `goree` CLI built successfully using the offline local Rust toolchain. An explicitly opted-in disposable acceptance script then completed **two independent direct, no-wrapper** tests against real `/usr/bin/runc` (v1.3.6). Each test used a unique temporary `XDG_RUNTIME_DIR` and bundle, verified that a deliberately invalid rootfs generated promptly returned useful create-error diagnostics, then executed `goree bundle init-rootless` and `goree runtime create → state(created) → start → state → delete`. Its statically linked container probe confirmed mapped UID/GID 0:0, real procfs, and a writable test-only proof-of-work marker. Both test runs exited successfully; independent readback found no remaining temporary acceptance directories. Source worktree remained clean. No Docker container was modified, stopped or migrated.
+
+**Acceptance scope:** This demonstrates the low-level GoreeCloud CLI rootless OCI lifecycle for a minimal disposable workload on one Debian host, and resolves the specifically reproduced inherited-output-pipe hang under those conditions. It does **not** establish broad OCI conformance, complete process-tree timeout cleanup for all runtimes, network/cgroup isolation, resource limits, persistent volumes/recovery, Compose interoperability, image-to-run workflows, or production Docker replacement. Image-to-bundle PR #4 remains Draft; the one-line Cargo metadata PR #14 was still separate and unmerged at this checkpoint. Production remains Docker.
 
 ## 2026-10-17 — Rootless procfs integrity and disposable runtime evidence
 

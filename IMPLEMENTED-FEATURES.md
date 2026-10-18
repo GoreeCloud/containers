@@ -15,8 +15,9 @@ The following capabilities exist in the current source and are Development-only:
 - Bundle-publication integrity guards reject unexpected OCI root paths and malformed mutable process fields before writing the owner-only configuration file.
 - Experimental `goree bundle init-rootless` configuration generation with an explicit user namespace, single-ID UID/GID maps to non-root host identities, a read-only root filesystem, `noNewPrivileges`, and a restricted `/proc` mount validated against a real, non-symlink mountpoint. An opt-in disposable `runc` rootless smoke test passed on one Debian VPS; broad native runtime acceptance remains pending.
 - `crun` and `runc` runtime identities, version probing, and low-level `create`, `start`, `state`, and `delete` execution.
+- Two independent, explicitly opted-in no-wrapper Development lifecycle tests on a non-root Debian VPS using real `/usr/bin/runc`; a minimal test bundle successfully completed `create → state → start → state → delete`, verified mapped UID/GID and procfs, preserved invalid-rootfs diagnostics, and cleaned up isolated state. This is not broad runtime acceptance.
 - Absolute/canonical runtime-path and bundle/config endpoint validation.
-- Direct child-process invocation without a command shell, bounded stdout/stderr retention, runtime timeout handling, and explicit failure propagation.
+- Direct child-process invocation without a command shell; bounded, nonblocking Unix stdout/stderr capture that does not wait on descendant-held pipe EOF; preserved, capped OCI `create` error diagnostics; configured runtime timeout handling and explicit failure propagation.
 - Strict lowercase SHA-256 digest parsing and verification.
 - Bounded content-addressed image store with verified existing-content reuse.
 - Development retrieval of supported OCI Image Manifest and Docker Registry v2 image manifests.
@@ -42,8 +43,8 @@ The current source does not establish:
 - Symbolic-link or hard-link archive entry extraction.
 - Image signature, attestation, SBOM, provenance, or trust-policy verification.
 - Real external-registry interoperability acceptance.
-- Accepted real `crun`/`runc` lifecycle behavior or full OCI conformance.
-- Rootless execution acceptance and resource-boundary validation.
+- Broad real `crun`/`runc` lifecycle acceptance across workloads and environments or full OCI conformance; only an isolated minimal direct `runc` rootless lifecycle smoke has passed.
+- Complete rootless isolation/resource-boundary acceptance beyond the verified disposable user-namespace identity/procfs lifecycle.
 - A high-level image-to-container `run` workflow.
 - Persistent engine metadata and recovery acceptance.
 - Complete logs/run/stop/inspect/remove engine workflows.
