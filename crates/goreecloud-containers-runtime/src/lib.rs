@@ -748,7 +748,9 @@ fn drain_nonblocking_datagrams(
             Ok(count) => {
                 let keep = limit.saturating_sub(captured.bytes.len()).min(count);
                 captured.bytes.extend_from_slice(&chunk[..keep]);
-                captured.truncated |= keep != count;
+                // SOCK_DGRAM discards an oversized packet tail when recv's
+                // buffer is full. Conservatively flag that possibility.
+                captured.truncated |= keep != count || count == chunk.len();
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -1243,6 +1245,28 @@ esac
             .expect("discard additional data beyond capture limit");
         assert_eq!(output.bytes.len(), 17);
         assert!(output.truncated);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oversized_create_diagnostic_packet_marks_capture_truncated() {
+        use std::os::unix::net::UnixDatagram;
+
+        let (reader, writer) = UnixDatagram::pair().expect("create diagnostic socket");
+        reader
+            .set_nonblocking(true)
+            .expect("nonblocking diagnostic reader");
+        let packet = vec![b'x'; 12_000];
+        assert_eq!(writer.send(&packet).expect("send oversized packet"), packet.len());
+
+        let mut output = CapturedOutput {
+            bytes: Vec::new(),
+            truncated: false,
+        };
+        drain_nonblocking_datagrams(&reader, &mut output, 1024 * 1024)
+            .expect("read an oversized create diagnostic");
+        assert_eq!(output.bytes.len(), 8192);
+        assert!(output.truncated, "lost datagram tail must be reported");
     }
 
     #[cfg(unix)]
