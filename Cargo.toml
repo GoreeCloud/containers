@@ -13,7 +13,7 @@ version = "0.1.0-dev.2"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
-repository = "https://github.com/GoreeCloud/goreecloud-containers"
+repository = "https://github.com/GoreeCloud/containers"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
