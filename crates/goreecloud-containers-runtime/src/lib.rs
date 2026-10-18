@@ -1017,6 +1017,7 @@ mod tests {
             Err(error) => panic!("failed to create fake runtime: {error}"),
         };
         assert!(file.write_all(script_body.as_bytes()).is_ok());
+        assert!(file.sync_all().is_ok());
         let mut permissions = match file.metadata() {
             Ok(metadata) => metadata.permissions(),
             Err(error) => panic!("failed to inspect fake runtime: {error}"),
