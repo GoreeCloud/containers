@@ -1,5 +1,12 @@
 # GoreeCloud Containers — Changelogs
 
+## 2026-10-17 — Experimental rootless OCI bundle profile accepted
+
+- PR #11 was squash-merged into Development `main` at `94834eea6bf73aa6a1b6e772a9d1d9785327addc`.
+- Added explicit OCI user-namespace configuration and single-ID UID/GID mappings for specified non-root host IDs, preserving `noNewPrivileges` and selecting a read-only root filesystem.
+- Added `goree bundle init-rootless` configuration generation and deterministic mapping/host-root rejection tests; exact-head Rust CI passed before merge.
+- The CLI's disposable bundle-generation test passed. This is **not** a real rootless workload or OCI runtime conformance acceptance.
+
 ## 2026-10-17 — Verified Development security stabilization
 
 - PR #8 merged on `main` with Unix owner-only creation of OCI bundle configurations and a regression test.
