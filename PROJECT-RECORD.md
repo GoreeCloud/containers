@@ -7,6 +7,16 @@
 **Authority:** Repository-local project record
 **Last Updated:** 2026-10-17
 
+## 2026-10-17 — Rootless procfs integrity and disposable runtime evidence
+
+PR #16 was squash-merged as `94ae8f8ca1dfd9de57ee0e95be6cfe3ef9152ca9`. Prior to the change, a disposable real `runc` workload failed when the generated rootless OCI profile omitted a `/proc` mount: first `open /proc: no such file or directory`, then, with a plain directory added, `unsafe procfs detected: incorrect procfs root filesystem type`. A manual test-only procfs declaration fixed execution without changing any production container.
+
+The accepted Development implementation provides a fixed `OciMount::Proc` declaration. Bundle initialization checks that `rootfs/proc/` exists as an actual directory, not a symlink, before writing owner-only `config.json`. Negative and positive regression tests pass; the ordinary minimal OCI configuration remains unchanged.
+
+On the non-root Debian VPS, `scripts/real-rootless-runc-smoke.sh` was explicitly enabled and successfully executed the generated profile with a statically linked probe under `runc` using a unique temporary state directory. The probe verified container UID/GID 0 (mapped to the unprivileged host identity) and genuine procfs filesystem type, then exited successfully with automatic cleanup. The opt-in guard rejected an ordinary invocation. Local full Rust workspace tests and build passed; exact-head Rust CI `39091756467` and merged-main Rust CI `39091834775` passed formatting, lint, tests, and build.
+
+This provides **one disposable real-runc rootless smoke result**, not acceptance of the native GoreeCloud high-level engine lifecycle, OCI conformance, all target environments, comprehensive isolation/resource controls, networking, storage, recovery, Compose, or production migration. Draft image-to-bundle PR #4 remains separate and unmerged; Docker production workloads were not altered.
+
 ## 2026-10-17 — OCI bundle input-validation hardening accepted
 
 PR #13 was squash-merged into `main` as `8ded53d25e090b3c2cc9f69e005ef28409a20072`. Bundle initialization now refuses a mutable OCI `root.path` differing from the verified `rootfs` directory and revalidates process args, environment and working directory for malformed/NUL-bearing values before writing `config.json`. These controls complement, but do not establish acceptance of, the experimental rootless OCI profile from PR #11.
