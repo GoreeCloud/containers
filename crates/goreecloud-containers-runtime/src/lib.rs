@@ -430,12 +430,12 @@ impl RuntimeExecutor {
     #[cfg(unix)]
     fn execute(&self, command: &RuntimeCommand) -> Result<RuntimeExecution, RuntimeExecutionError> {
         use std::os::fd::OwnedFd;
-        use std::os::unix::net::UnixStream;
+        use std::os::unix::net::{UnixDatagram, UnixStream};
 
         // OCI create may leave stopped init processes holding stdout/stderr.
-        // Use stable null descriptors during create to avoid an inherited pipe
-        // hanging this command or later causing SIGPIPE after the parent exits.
-        // Creation-error diagnostic capture is still an acceptance blocker.
+        // A datagram endpoint safely captures create errors while the parent
+        // runs: when the reader closes, later descendant writes cannot trigger
+        // SIGPIPE, unlike a stream pipe. Other commands retain stream capture.
         let creating_container = command.args.first().is_some_and(|arg| arg == "create");
         let (mut stdout_reader, stdout_writer) =
             UnixStream::pair().map_err(|source| RuntimeExecutionError::Spawn {
@@ -459,11 +459,31 @@ impl RuntimeExecutor {
                 stream: "stderr",
                 source,
             })?;
+        let (mut create_stderr_reader, create_stderr_writer) = if creating_container {
+            let (reader, writer) =
+                UnixDatagram::pair().map_err(|source| RuntimeExecutionError::Spawn {
+                    program: command.program.clone(),
+                    source,
+                })?;
+            reader
+                .set_nonblocking(true)
+                .map_err(|source| RuntimeExecutionError::Read {
+                    stream: "stderr",
+                    source,
+                })?;
+            (Some(reader), Some(writer))
+        } else {
+            (None, None)
+        };
 
         let mut invocation = Command::new(&command.program);
         invocation.args(&command.args).stdin(Stdio::null());
         if creating_container {
-            invocation.stdout(Stdio::null()).stderr(Stdio::null());
+            invocation.stdout(Stdio::null());
+            let stderr: OwnedFd = create_stderr_writer
+                .expect("create always has a diagnostic socket")
+                .into();
+            invocation.stderr(Stdio::from(stderr));
         } else {
             let stdout: OwnedFd = stdout_writer.into();
             let stderr: OwnedFd = stderr_writer.into();
@@ -490,7 +510,13 @@ impl RuntimeExecutor {
         let cadence = self.policy.poll_interval.max(Duration::from_millis(1));
 
         let status = loop {
-            if !creating_container {
+            if let Some(reader) = &mut create_stderr_reader {
+                drain_nonblocking_datagrams(
+                    reader,
+                    &mut stderr,
+                    self.policy.max_output_bytes_per_stream,
+                )?;
+            } else {
                 drain_nonblocking(
                     &mut stdout_reader,
                     &mut stdout,
@@ -513,8 +539,14 @@ impl RuntimeExecutor {
                 Some(status) => {
                     // Never wait for EOF: OCI descendants may keep the write
                     // side open after the command process has exited.
-                    if !creating_container {
-                        for _ in 0..16 {
+                    for _ in 0..16 {
+                        if let Some(reader) = &mut create_stderr_reader {
+                            drain_nonblocking_datagrams(
+                                reader,
+                                &mut stderr,
+                                self.policy.max_output_bytes_per_stream,
+                            )?;
+                        } else {
                             drain_nonblocking(
                                 &mut stdout_reader,
                                 &mut stdout,
@@ -544,7 +576,13 @@ impl RuntimeExecutor {
                         program: command.program.clone(),
                         source,
                     })?;
-                    if !creating_container {
+                    if let Some(reader) = &mut create_stderr_reader {
+                        drain_nonblocking_datagrams(
+                            reader,
+                            &mut stderr,
+                            self.policy.max_output_bytes_per_stream,
+                        )?;
+                    } else {
                         drain_nonblocking(
                             &mut stdout_reader,
                             &mut stdout,
@@ -693,6 +731,33 @@ fn drain_nonblocking(
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(source) => return Err(RuntimeExecutionError::Read { stream, source }),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn drain_nonblocking_datagrams(
+    reader: &std::os::unix::net::UnixDatagram,
+    captured: &mut CapturedOutput,
+    limit: usize,
+) -> Result<(), RuntimeExecutionError> {
+    let mut chunk = [0_u8; 8192];
+    for _ in 0..8 {
+        match reader.recv(&mut chunk) {
+            Ok(count) => {
+                let keep = limit.saturating_sub(captured.bytes.len()).min(count);
+                captured.bytes.extend_from_slice(&chunk[..keep]);
+                captured.truncated |= keep != count;
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(source) => {
+                return Err(RuntimeExecutionError::Read {
+                    stream: "stderr",
+                    source,
+                });
+            }
         }
     }
     Ok(())
@@ -1149,6 +1214,58 @@ esac
         assert!(delete.is_ok());
 
         assert!(fs::remove_dir_all(directory).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_preserves_bounded_failure_diagnostics() {
+        let (directory, script) = fake_runtime(
+            "create-failure-diagnostics",
+            "#!/bin/sh\nprintf 'create-denied' >&2\nexit 27\n",
+        );
+        let command = RuntimeCommand {
+            program: script,
+            args: vec![OsString::from("create")],
+        };
+        match RuntimeExecutor::default().execute(&command) {
+            Err(RuntimeExecutionError::NonZeroExit {
+                code: Some(27),
+                stderr,
+                ..
+            }) => assert!(stderr.text_lossy().contains("create-denied")),
+            other => panic!("expected create failure diagnostics: {other:?}"),
+        }
+        fs::remove_dir_all(directory).expect("clean test directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_descendant_diagnostic_write_does_not_receive_sigpipe() {
+        let directory = temporary_directory("create-no-sigpipe");
+        assert!(fs::create_dir_all(&directory).is_ok());
+        let marker = directory.join("descendant-survived");
+        let script = directory.join("fake-runtime");
+        let body = format!(
+            "#!/bin/sh\n(sleep 0.2; printf 'late-diagnostic' >&2; printf survived > '{}') &\nexit 0\n",
+            marker.display()
+        );
+        fs::write(&script, body).expect("write disposable fixture");
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
+            .expect("make fixture executable");
+        let command = RuntimeCommand {
+            program: script,
+            args: vec![OsString::from("create")],
+        };
+        RuntimeExecutor::default()
+            .execute(&command)
+            .expect("create should not wait for a descendant");
+        thread::sleep(Duration::from_millis(450));
+        assert_eq!(
+            fs::read_to_string(marker).expect("child must survive stderr write"),
+            "survived"
+        );
+        fs::remove_dir_all(directory).expect("clean test directory");
     }
 
     #[cfg(unix)]
