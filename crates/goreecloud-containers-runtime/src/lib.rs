@@ -900,10 +900,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn runtime_probe_times_out() {
-        let (directory, script) = fake_runtime(
-            "timed-probe",
-            "#!/bin/sh\nexec sleep 2\n",
-        );
+        let (directory, script) = fake_runtime("timed-probe", "#!/bin/sh\nexec sleep 2\n");
         let runtime = ProcessOciRuntime::new_for_execution(OciRuntimeKind::Crun, script)
             .expect("fake runtime should be valid");
         let executor = RuntimeExecutor::new(RuntimeExecutionPolicy {
@@ -913,7 +910,9 @@ mod tests {
         });
         assert!(matches!(
             runtime.probe_with_executor(&executor),
-            Err(RuntimeError::ProbeExecution(RuntimeExecutionError::TimedOut { .. }))
+            Err(RuntimeError::ProbeExecution(
+                RuntimeExecutionError::TimedOut { .. }
+            ))
         ));
         fs::remove_dir_all(directory).expect("test directory should be removable");
     }
