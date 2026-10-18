@@ -35,6 +35,9 @@ impl OciProcess {
         if args.iter().any(|argument| argument.is_empty()) {
             return Err(OciConfigError::EmptyProcessArg);
         }
+        if args.iter().any(|argument| argument.contains('\0')) {
+            return Err(OciConfigError::InvalidProcessArg);
+        }
 
         Ok(Self {
             terminal: false,
@@ -58,6 +61,9 @@ impl OciProcess {
 
     pub fn with_env(mut self, env: Vec<String>) -> Result<Self, OciConfigError> {
         if env.iter().any(|entry| {
+            if entry.contains('\0') {
+                return true;
+            }
             let Some((name, _)) = entry.split_once('=') else {
                 return true;
             };
@@ -71,6 +77,9 @@ impl OciProcess {
 
     pub fn with_cwd(mut self, cwd: impl Into<String>) -> Result<Self, OciConfigError> {
         let cwd = cwd.into();
+        if cwd.contains('\0') {
+            return Err(OciConfigError::InvalidCwd(cwd));
+        }
         if !cwd.starts_with('/') {
             return Err(OciConfigError::CwdNotAbsolute(cwd));
         }
@@ -260,9 +269,12 @@ pub struct InitializedBundle {
 pub enum OciConfigError {
     MissingProcessArgs,
     EmptyProcessArg,
+    InvalidProcessArg,
     RootlessHostIdMustBeUnprivileged,
     InvalidEnvironmentEntry,
+    InvalidCwd(String),
     CwdNotAbsolute(String),
+    UnsafeRootPath(String),
     BundlePathNotAbsolute(PathBuf),
     BundlePathSymlink(PathBuf),
     BundleNotDirectory(PathBuf),
@@ -285,12 +297,17 @@ impl fmt::Display for OciConfigError {
             Self::EmptyProcessArg => {
                 formatter.write_str("OCI process arguments must not contain empty values")
             }
+            Self::InvalidProcessArg => {
+                formatter.write_str("OCI process arguments must not contain NUL bytes")
+            }
             Self::RootlessHostIdMustBeUnprivileged => {
                 formatter.write_str("rootless host UID and GID must both be nonzero")
             }
             Self::InvalidEnvironmentEntry => {
                 formatter.write_str("OCI environment entries must use non-empty NAME=VALUE form")
             }
+            Self::InvalidCwd(_) => formatter.write_str("OCI cwd contains invalid NUL"),
+            Self::UnsafeRootPath(_) => formatter.write_str("OCI root path is not bundle rootfs"),
             Self::CwdNotAbsolute(cwd) => {
                 write!(formatter, "OCI process cwd must be absolute: {cwd}")
             }
@@ -357,6 +374,21 @@ pub fn initialize_linux_bundle(
             bundle_path.to_path_buf(),
         ));
     }
+
+    if config.root.path != DEFAULT_ROOTFS_DIRECTORY {
+        return Err(OciConfigError::UnsafeRootPath(config.root.path.clone()));
+    }
+    // These fields are public: validate again even when a caller bypasses the
+    // checked constructors by changing a configuration after construction.
+    OciProcess::minimal(config.process.args.clone())?;
+    config
+        .process
+        .clone()
+        .with_env(config.process.env.clone())?;
+    config
+        .process
+        .clone()
+        .with_cwd(config.process.cwd.clone())?;
 
     let bundle_metadata =
         fs::symlink_metadata(bundle_path).map_err(|source| OciConfigError::Io {
@@ -523,6 +555,53 @@ mod tests {
         assert!(json.contains("\"path\": \"rootfs\""));
         assert!(json.contains("hello \\\"GoreeCloud\\\""));
         assert!(json.ends_with("}\n"));
+    }
+
+    #[test]
+    fn rejects_unsafe_oci_root_without_creating_config() {
+        let directory = temporary_directory("unsafe-root");
+        fs::create_dir_all(directory.join(DEFAULT_ROOTFS_DIRECTORY)).expect("create test rootfs");
+        let mut config =
+            OciConfig::minimal_linux(vec!["/bin/true".to_owned()]).expect("valid minimal config");
+        config.root.path = "../outside".to_owned();
+        assert!(matches!(
+            initialize_linux_bundle(&directory, &config),
+            Err(OciConfigError::UnsafeRootPath(_))
+        ));
+        assert!(!directory.join(OCI_CONFIG_FILENAME).exists());
+        fs::remove_dir_all(directory).expect("cleanup test directory");
+    }
+
+    #[test]
+    fn rejects_invalid_mutable_process_fields_before_publication() {
+        let directory = temporary_directory("invalid-process-fields");
+        fs::create_dir_all(directory.join(DEFAULT_ROOTFS_DIRECTORY)).expect("create test rootfs");
+        let base =
+            OciConfig::minimal_linux(vec!["/bin/true".to_owned()]).expect("valid minimal config");
+
+        let mut invalid = base.clone();
+        invalid.process.args = vec!["/bin/true\0extra".to_owned()];
+        assert!(matches!(
+            initialize_linux_bundle(&directory, &invalid),
+            Err(OciConfigError::InvalidProcessArg)
+        ));
+
+        invalid = base.clone();
+        invalid.process.env = vec!["TEST=good\0bad".to_owned()];
+        assert!(matches!(
+            initialize_linux_bundle(&directory, &invalid),
+            Err(OciConfigError::InvalidEnvironmentEntry)
+        ));
+
+        invalid = base;
+        invalid.process.cwd = "/work\0bad".to_owned();
+        assert!(matches!(
+            initialize_linux_bundle(&directory, &invalid),
+            Err(OciConfigError::InvalidCwd(_))
+        ));
+
+        assert!(!directory.join(OCI_CONFIG_FILENAME).exists());
+        fs::remove_dir_all(directory).expect("cleanup test directory");
     }
 
     #[test]
