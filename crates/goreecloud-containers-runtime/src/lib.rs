@@ -467,14 +467,18 @@ impl RuntimeExecutor {
         } else {
             let stdout: OwnedFd = stdout_writer.into();
             let stderr: OwnedFd = stderr_writer.into();
-            invocation.stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
+            invocation
+                .stdout(Stdio::from(stdout))
+                .stderr(Stdio::from(stderr));
         }
 
         let started = Instant::now();
-        let mut child = invocation.spawn().map_err(|source| RuntimeExecutionError::Spawn {
-            program: command.program.clone(),
-            source,
-        })?;
+        let mut child = invocation
+            .spawn()
+            .map_err(|source| RuntimeExecutionError::Spawn {
+                program: command.program.clone(),
+                source,
+            })?;
         let mut stdout = CapturedOutput {
             bytes: Vec::new(),
             truncated: false,
@@ -500,10 +504,12 @@ impl RuntimeExecutor {
                     "stderr",
                 )?;
             }
-            match child.try_wait().map_err(|source| RuntimeExecutionError::Wait {
-                program: command.program.clone(),
-                source,
-            })? {
+            match child
+                .try_wait()
+                .map_err(|source| RuntimeExecutionError::Wait {
+                    program: command.program.clone(),
+                    source,
+                })? {
                 Some(status) => {
                     // Never wait for EOF: OCI descendants may keep the write
                     // side open after the command process has exited.
@@ -1147,8 +1153,10 @@ esac
     #[cfg(unix)]
     #[test]
     fn create_returns_while_descendant_retains_inherited_streams() {
-        let (directory, script) =
-            fake_runtime("create-inherits-output", "#!/bin/sh\nsleep 2 &\nprintf 'created\n'\n");
+        let (directory, script) = fake_runtime(
+            "create-inherits-output",
+            "#!/bin/sh\nsleep 2 &\nprintf 'created\n'\n",
+        );
         let command = RuntimeCommand {
             program: script,
             args: vec![OsString::from("create")],
@@ -1159,7 +1167,10 @@ esac
             ..RuntimeExecutionPolicy::default()
         })
         .execute(&command);
-        assert!(result.is_ok(), "create should not wait for child EOF: {result:?}");
+        assert!(
+            result.is_ok(),
+            "create should not wait for child EOF: {result:?}"
+        );
         assert!(began.elapsed() < Duration::from_millis(900));
         fs::remove_dir_all(directory).expect("clean test directory");
     }
@@ -1201,7 +1212,10 @@ esac
             ..RuntimeExecutionPolicy::default()
         })
         .execute(&command);
-        assert!(matches!(result, Err(RuntimeExecutionError::TimedOut { .. })));
+        assert!(matches!(
+            result,
+            Err(RuntimeExecutionError::TimedOut { .. })
+        ));
         assert!(began.elapsed() < Duration::from_secs(1));
     }
 
