@@ -527,12 +527,8 @@ mod tests {
 
     #[test]
     fn rootless_profile_maps_container_root_to_nonroot_host_identity() {
-        let config = OciConfig::minimal_rootless_linux(
-            vec!["/bin/true".to_owned()],
-            1001,
-            1002,
-        )
-        .expect("non-root host identities should be accepted");
+        let config = OciConfig::minimal_rootless_linux(vec!["/bin/true".to_owned()], 1001, 1002)
+            .expect("non-root host identities should be accepted");
 
         assert_eq!(config.process.user, OciUser { uid: 0, gid: 0 });
         assert!(config.process.no_new_privileges);
@@ -540,16 +536,28 @@ mod tests {
         assert!(config.linux.namespaces.contains(&LinuxNamespaceType::User));
         assert_eq!(
             config.linux.uid_mappings,
-            vec![OciIdMapping { container_id: 0, host_id: 1001, size: 1 }]
+            vec![OciIdMapping {
+                container_id: 0,
+                host_id: 1001,
+                size: 1
+            }]
         );
         assert_eq!(
             config.linux.gid_mappings,
-            vec![OciIdMapping { container_id: 0, host_id: 1002, size: 1 }]
+            vec![OciIdMapping {
+                container_id: 0,
+                host_id: 1002,
+                size: 1
+            }]
         );
         let json = config.to_json_pretty();
         assert!(json.contains("\"type\": \"user\""));
-        assert!(json.contains("\"uidMappings\": [{\"containerID\": 0, \"hostID\": 1001, \"size\": 1}]"));
-        assert!(json.contains("\"gidMappings\": [{\"containerID\": 0, \"hostID\": 1002, \"size\": 1}]"));
+        assert!(
+            json.contains("\"uidMappings\": [{\"containerID\": 0, \"hostID\": 1001, \"size\": 1}]")
+        );
+        assert!(
+            json.contains("\"gidMappings\": [{\"containerID\": 0, \"hostID\": 1002, \"size\": 1}]")
+        );
     }
 
     #[test]
