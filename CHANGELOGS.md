@@ -1,5 +1,11 @@
 # GoreeCloud Containers — Changelogs
 
+## 2026-10-17 — OCI bundle publication input validation
+
+- PR #13 merged as `8ded53d25e090b3c2cc9f69e005ef28409a20072`; OCI `root.path` must match the verified bundle `rootfs`, and mutable process fields are revalidated before creating `config.json`.
+- Regression tests, exact-head CI and post-merge Rust CI succeeded.
+- Rootless runtime execution, real workload lifecycle, OCI conformance, and Docker production migration remain unaccepted.
+
 ## 2026-10-17 — Experimental rootless OCI bundle profile accepted
 
 - PR #11 was squash-merged into Development `main` at `94834eea6bf73aa6a1b6e772a9d1d9785327addc`.
