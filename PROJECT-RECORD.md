@@ -7,6 +7,16 @@
 **Authority:** Repository-local project record
 **Last Updated:** 2026-10-17
 
+## 2026-10-17 — Rootless OCI configuration foundation, not rootless runtime acceptance
+
+PR #11, **experimental rootless OCI bundle configuration profile**, was merged as `94834eea6bf73aa6a1b6e772a9d1d9785327addc`. The exact-head Rust CI run `39088870983` passed formatting, Clippy, tests, and build. The Development CLI can generate an owner-only bundle configuration with explicit user namespace and non-root host UID/GID mapping, a read-only root filesystem, and `noNewPrivileges`. Unit tests and a disposable CLI configuration-generation smoke test passed.
+
+The VPS's `runc spec --rootless` reference showed the need for explicit user namespace and UID/GID mappings; both the VPS and laptop permit unprivileged user namespaces. An isolated rootless Podman/`crun` Alpine smoke on the laptop passed, but this tests the **host**, not the GoreeCloud engine. No native real runtime lifecycle acceptance, conformance, resource isolation, or rootless production readiness is claimed.
+
+PR #4 (verified-image-to-OCI-bundle integration) remains unmerged and Draft. Docker remains the production runtime; no container migration occurred.
+
+The project-specification migration PR #7 was accepted on `main` as `b9131efd10abcbd10260db6885ece141fadffd52`, with passing post-merge Rust and Platform Contract checks and authoritative source readback. The historical Drive specification sources are retained pending final source-parity and migration-manifest reconciliation.
+
 ## 2026-10-17 — Accepted Development security milestones
 
 PR #8 was merged on `main` as `46b89ee9fce2f69d1c401208f15f9a7aec51e250`. New OCI bundle configurations use Unix mode `0600` and the regression test passed.
