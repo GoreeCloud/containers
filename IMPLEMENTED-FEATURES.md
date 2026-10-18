@@ -13,7 +13,7 @@ The following capabilities exist in the current source and are Development-only:
 - Deterministic in-memory state for development and tests.
 - Typed minimal Linux OCI configuration generation and controlled no-overwrite bundle initialization.
 - Bundle-publication integrity guards reject unexpected OCI root paths and malformed mutable process fields before writing the owner-only configuration file.
-- Experimental `goree bundle init-rootless` configuration generation with an explicit user namespace, single-ID UID/GID maps to non-root host identities, a read-only root filesystem, and `noNewPrivileges` (not accepted runtime execution).
+- Experimental `goree bundle init-rootless` configuration generation with an explicit user namespace, single-ID UID/GID maps to non-root host identities, a read-only root filesystem, `noNewPrivileges`, and a restricted `/proc` mount validated against a real, non-symlink mountpoint. An opt-in disposable `runc` rootless smoke test passed on one Debian VPS; broad native runtime acceptance remains pending.
 - `crun` and `runc` runtime identities, version probing, and low-level `create`, `start`, `state`, and `delete` execution.
 - Absolute/canonical runtime-path and bundle/config endpoint validation.
 - Direct child-process invocation without a command shell, bounded stdout/stderr retention, runtime timeout handling, and explicit failure propagation.
