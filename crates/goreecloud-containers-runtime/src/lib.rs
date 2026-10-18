@@ -1280,11 +1280,26 @@ esac
             args: vec![OsString::from("create")],
         };
         let began = Instant::now();
-        let result = RuntimeExecutor::new(RuntimeExecutionPolicy {
+        let executor = RuntimeExecutor::new(RuntimeExecutionPolicy {
             timeout: Duration::from_millis(500),
             ..RuntimeExecutionPolicy::default()
-        })
-        .execute(&command);
+        });
+        let mut result = executor.execute(&command);
+        // Filesystems used by shared CI runners can transiently reject a newly
+        // created shell fixture with ETXTBSY. Only retry that spawn error:
+        // runtime deadlines and other execution failures must remain visible.
+        for _ in 0..4 {
+            if matches!(
+                &result,
+                Err(RuntimeExecutionError::Spawn { source, .. })
+                    if source.kind() == io::ErrorKind::ExecutableFileBusy
+            ) {
+                thread::sleep(Duration::from_millis(15));
+                result = executor.execute(&command);
+            } else {
+                break;
+            }
+        }
         assert!(
             result.is_ok(),
             "create should not wait for child EOF: {result:?}"
