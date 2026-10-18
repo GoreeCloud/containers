@@ -60,17 +60,98 @@ fn opt_in_real_runtime_executes_disposable_lifecycle_when_fully_configured() {
     runtime
         .create(&executor, &id, &bundle)
         .expect("real runtime create must succeed for the supplied disposable bundle");
-    runtime
-        .start(&executor, &id)
-        .expect("real runtime start must succeed for the supplied disposable bundle");
-    let state = runtime
-        .state(&executor, &id)
-        .expect("real runtime state must succeed after start");
-    assert!(
-        !state.stdout.text_lossy().trim().is_empty(),
-        "real runtime state must return bounded observable state"
+
+    let result = run_created_lifecycle(
+        || {
+            runtime
+                .start(&executor, &id)
+                .map(|_| ())
+                .map_err(|error| format!("real runtime start failed: {error}"))
+        },
+        || {
+            let state = runtime
+                .state(&executor, &id)
+                .map_err(|error| format!("real runtime state failed: {error}"))?;
+            if state.stdout.text_lossy().trim().is_empty() {
+                return Err("real runtime returned empty state output".to_owned());
+            }
+            Ok(())
+        },
+        || {
+            runtime
+                .delete(&executor, &id)
+                .map(|_| ())
+                .map_err(|error| format!("real runtime delete failed: {error}"))
+        },
     );
-    runtime
-        .delete(&executor, &id)
-        .expect("real runtime delete must succeed for the supplied disposable container");
+    result.expect("real runtime lifecycle and cleanup must succeed");
+}
+
+fn run_created_lifecycle<S, I, D>(start: S, inspect: I, delete: D) -> Result<(), String>
+where
+    S: FnOnce() -> Result<(), String>,
+    I: FnOnce() -> Result<(), String>,
+    D: FnOnce() -> Result<(), String>,
+{
+    let outcome = start().and_then(|()| inspect());
+    let cleanup = delete();
+    match (outcome, cleanup) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(e), Ok(())) | (Ok(()), Err(e)) => Err(e),
+        (Err(e), Err(c)) => Err(format!("{e}; cleanup also failed: {c}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_created_lifecycle;
+    use std::cell::Cell;
+
+    #[test]
+    fn cleanup_runs_when_start_fails() {
+        let inspected = Cell::new(false);
+        let cleaned = Cell::new(false);
+        let result = run_created_lifecycle(
+            || Err("start failed".to_owned()),
+            || {
+                inspected.set(true);
+                Ok(())
+            },
+            || {
+                cleaned.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(result.err().as_deref(), Some("start failed"));
+        assert!(!inspected.get());
+        assert!(cleaned.get());
+    }
+
+    #[test]
+    fn cleanup_runs_when_inspection_fails() {
+        let cleaned = Cell::new(false);
+        let result = run_created_lifecycle(
+            || Ok(()),
+            || Err("state failed".to_owned()),
+            || {
+                cleaned.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(result.err().as_deref(), Some("state failed"));
+        assert!(cleaned.get());
+    }
+
+    #[test]
+    fn cleanup_failure_remains_visible_alongside_start_failure() {
+        let result = run_created_lifecycle(
+            || Err("start failed".to_owned()),
+            || Ok(()),
+            || Err("delete failed".to_owned()),
+        );
+        assert_eq!(
+            result.err().as_deref(),
+            Some("start failed; cleanup also failed: delete failed")
+        );
+    }
 }
