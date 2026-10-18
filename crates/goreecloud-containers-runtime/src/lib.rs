@@ -830,6 +830,10 @@ mod tests {
             Ok(metadata) => metadata.permissions(),
             Err(error) => panic!("failed to inspect fake runtime: {error}"),
         };
+        // Close the write handle before running the fixture. On some Linux
+        // filesystems, executing a script while it is open for writing fails
+        // with ETXTBSY (Text file busy).
+        drop(file);
         permissions.set_mode(0o755);
         assert!(fs::set_permissions(&script, permissions).is_ok());
         (directory, script)
