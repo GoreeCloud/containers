@@ -7,6 +7,14 @@
 **Authority:** Repository-local project record
 **Last Updated:** 2026-10-17
 
+## 2026-10-17 — OCI bundle input-validation hardening accepted
+
+PR #13 was squash-merged into `main` as `8ded53d25e090b3c2cc9f69e005ef28409a20072`. Bundle initialization now refuses a mutable OCI `root.path` differing from the verified `rootfs` directory and revalidates process args, environment and working directory for malformed/NUL-bearing values before writing `config.json`. These controls complement, but do not establish acceptance of, the experimental rootless OCI profile from PR #11.
+
+The integrated source passed local Rust workspace tests/build (including regression coverage); exact-head GitHub Rust CI run `39089690429` passed formatting, Clippy, tests and build. Post-merge `main` Rust CI `39089808179` succeeded. Accepted main OCI source blob `6b9511041f80cde169109057861677d6ce70441b` matched the locally verified source.
+
+Cargo workspace repository-metadata correction PR #14 passed CI but remains **open and unmerged** because the authorized GitHub merge action was blocked. Draft image-to-bundle integration PR #4 and actual native rootless-runtime acceptance remain outstanding. Docker remains the production runtime; no Docker migration occurred.
+
 ## 2026-10-17 — Rootless OCI configuration foundation, not rootless runtime acceptance
 
 PR #11, **experimental rootless OCI bundle configuration profile**, was merged as `94834eea6bf73aa6a1b6e772a9d1d9785327addc`. The exact-head Rust CI run `39088870983` passed formatting, Clippy, tests, and build. The Development CLI can generate an owner-only bundle configuration with explicit user namespace and non-root host UID/GID mapping, a read-only root filesystem, and `noNewPrivileges`. Unit tests and a disposable CLI configuration-generation smoke test passed.
