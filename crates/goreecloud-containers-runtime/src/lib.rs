@@ -1469,6 +1469,53 @@ esac
 
     #[cfg(unix)]
     #[test]
+    fn timed_out_runtime_does_not_imply_descendant_cleanup() {
+        // A stopped OCI init is a descendant intentionally left alive after
+        // OCI create. Timing out the direct runtime child must not blindly
+        // terminate its entire process tree. This disposable descendant has
+        // a short lifetime; real OCI state cleanup needs separate supervision.
+        let script_body = r#"#!/bin/sh
+(sleep 0.5; printf 'survived' > "$(dirname "$0")/descendant-marker") </dev/null >/dev/null 2>&1 &
+printf 'timeout-diagnostic' >&2
+exec sleep 5
+"#;
+        let (directory, script) = fake_runtime("timeout-descendant", script_body);
+        let command = RuntimeCommand {
+            program: script,
+            args: vec![OsString::from("state")],
+        };
+        let executor = RuntimeExecutor::new(RuntimeExecutionPolicy {
+            timeout: Duration::from_millis(200),
+            poll_interval: Duration::from_millis(5),
+            ..RuntimeExecutionPolicy::default()
+        });
+        let started = Instant::now();
+        match executor.execute(&command) {
+            Err(RuntimeExecutionError::TimedOut { stderr, .. }) => {
+                assert!(stderr.text_lossy().contains("timeout-diagnostic"));
+            }
+            other => panic!("expected bounded direct-child timeout: {other:?}"),
+        }
+        assert!(started.elapsed() < Duration::from_secs(2));
+
+        // Do not claim all descendants were reaped just because the direct
+        // child exited. Allow the brief fixture enough time to prove survival.
+        let marker = directory.join("descendant-marker");
+        for _ in 0..30 {
+            if marker.is_file() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(
+            fs::read_to_string(&marker).expect("short-lived descendant should run"),
+            "survived"
+        );
+        fs::remove_dir_all(directory).expect("clean disposable fixture");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn rejects_nonzero_exit_and_preserves_bounded_stderr() {
         let command = RuntimeCommand {
             program: PathBuf::from("/bin/sh"),
