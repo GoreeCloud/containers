@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
 use std::thread;
+#[cfg(not(unix))]
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -426,6 +427,162 @@ impl RuntimeExecutor {
         self.policy
     }
 
+    #[cfg(unix)]
+    fn execute(&self, command: &RuntimeCommand) -> Result<RuntimeExecution, RuntimeExecutionError> {
+        use std::os::fd::OwnedFd;
+        use std::os::unix::net::UnixStream;
+
+        // OCI create may leave stopped init processes holding stdout/stderr.
+        // Use stable null descriptors during create to avoid an inherited pipe
+        // hanging this command or later causing SIGPIPE after the parent exits.
+        // Creation-error diagnostic capture is still an acceptance blocker.
+        let creating_container = command.args.first().is_some_and(|arg| arg == "create");
+        let (mut stdout_reader, stdout_writer) =
+            UnixStream::pair().map_err(|source| RuntimeExecutionError::Spawn {
+                program: command.program.clone(),
+                source,
+            })?;
+        let (mut stderr_reader, stderr_writer) =
+            UnixStream::pair().map_err(|source| RuntimeExecutionError::Spawn {
+                program: command.program.clone(),
+                source,
+            })?;
+        stdout_reader
+            .set_nonblocking(true)
+            .map_err(|source| RuntimeExecutionError::Read {
+                stream: "stdout",
+                source,
+            })?;
+        stderr_reader
+            .set_nonblocking(true)
+            .map_err(|source| RuntimeExecutionError::Read {
+                stream: "stderr",
+                source,
+            })?;
+
+        let mut invocation = Command::new(&command.program);
+        invocation.args(&command.args).stdin(Stdio::null());
+        if creating_container {
+            invocation.stdout(Stdio::null()).stderr(Stdio::null());
+        } else {
+            let stdout: OwnedFd = stdout_writer.into();
+            let stderr: OwnedFd = stderr_writer.into();
+            invocation.stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
+        }
+
+        let started = Instant::now();
+        let mut child = invocation.spawn().map_err(|source| RuntimeExecutionError::Spawn {
+            program: command.program.clone(),
+            source,
+        })?;
+        let mut stdout = CapturedOutput {
+            bytes: Vec::new(),
+            truncated: false,
+        };
+        let mut stderr = CapturedOutput {
+            bytes: Vec::new(),
+            truncated: false,
+        };
+        let cadence = self.policy.poll_interval.max(Duration::from_millis(1));
+
+        let status = loop {
+            if !creating_container {
+                drain_nonblocking(
+                    &mut stdout_reader,
+                    &mut stdout,
+                    self.policy.max_output_bytes_per_stream,
+                    "stdout",
+                )?;
+                drain_nonblocking(
+                    &mut stderr_reader,
+                    &mut stderr,
+                    self.policy.max_output_bytes_per_stream,
+                    "stderr",
+                )?;
+            }
+            match child.try_wait().map_err(|source| RuntimeExecutionError::Wait {
+                program: command.program.clone(),
+                source,
+            })? {
+                Some(status) => {
+                    // Never wait for EOF: OCI descendants may keep the write
+                    // side open after the command process has exited.
+                    if !creating_container {
+                        for _ in 0..16 {
+                            drain_nonblocking(
+                                &mut stdout_reader,
+                                &mut stdout,
+                                self.policy.max_output_bytes_per_stream,
+                                "stdout",
+                            )?;
+                            drain_nonblocking(
+                                &mut stderr_reader,
+                                &mut stderr,
+                                self.policy.max_output_bytes_per_stream,
+                                "stderr",
+                            )?;
+                        }
+                    }
+                    break status;
+                }
+                None if started.elapsed() >= self.policy.timeout => {
+                    if let Err(source) = child.kill() {
+                        if source.kind() != io::ErrorKind::InvalidInput {
+                            return Err(RuntimeExecutionError::Kill {
+                                program: command.program.clone(),
+                                source,
+                            });
+                        }
+                    }
+                    child.wait().map_err(|source| RuntimeExecutionError::Wait {
+                        program: command.program.clone(),
+                        source,
+                    })?;
+                    if !creating_container {
+                        drain_nonblocking(
+                            &mut stdout_reader,
+                            &mut stdout,
+                            self.policy.max_output_bytes_per_stream,
+                            "stdout",
+                        )?;
+                        drain_nonblocking(
+                            &mut stderr_reader,
+                            &mut stderr,
+                            self.policy.max_output_bytes_per_stream,
+                            "stderr",
+                        )?;
+                    }
+                    return Err(RuntimeExecutionError::TimedOut {
+                        program: command.program.clone(),
+                        timeout: self.policy.timeout,
+                        stdout,
+                        stderr,
+                    });
+                }
+                None => {
+                    let remaining = self.policy.timeout.saturating_sub(started.elapsed());
+                    thread::sleep(cadence.min(remaining));
+                }
+            }
+        };
+
+        if status.success() {
+            Ok(RuntimeExecution {
+                code: status.code(),
+                stdout,
+                stderr,
+            })
+        } else {
+            Err(RuntimeExecutionError::NonZeroExit {
+                program: command.program.clone(),
+                code: status.code(),
+                stdout,
+                stderr,
+            })
+        }
+    }
+
+    #[cfg(not(unix))]
     fn execute(&self, command: &RuntimeCommand) -> Result<RuntimeExecution, RuntimeExecutionError> {
         let mut child = Command::new(&command.program)
             .args(&command.args)
@@ -510,6 +667,32 @@ impl Default for RuntimeExecutor {
     }
 }
 
+#[cfg(unix)]
+fn drain_nonblocking(
+    reader: &mut std::os::unix::net::UnixStream,
+    captured: &mut CapturedOutput,
+    limit: usize,
+    stream: &'static str,
+) -> Result<(), RuntimeExecutionError> {
+    // Bound the work per pass, even if a runtime is continuously writing.
+    let mut chunk = [0_u8; 8192];
+    for _ in 0..8 {
+        match reader.read(&mut chunk) {
+            Ok(0) => return Ok(()),
+            Ok(count) => {
+                let keep = limit.saturating_sub(captured.bytes.len()).min(count);
+                captured.bytes.extend_from_slice(&chunk[..keep]);
+                captured.truncated |= keep != count;
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(source) => return Err(RuntimeExecutionError::Read { stream, source }),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
 fn finish_capture(
     stdout_reader: JoinHandle<io::Result<CapturedOutput>>,
     stderr_reader: JoinHandle<io::Result<CapturedOutput>>,
@@ -519,6 +702,7 @@ fn finish_capture(
     Ok((stdout_result?, stderr_result?))
 }
 
+#[cfg(not(unix))]
 fn join_capture(
     reader: JoinHandle<io::Result<CapturedOutput>>,
     stream: &'static str,
@@ -530,6 +714,7 @@ fn join_capture(
     }
 }
 
+#[cfg(not(unix))]
 fn read_bounded(mut reader: impl Read, max_output_bytes: usize) -> io::Result<CapturedOutput> {
     let mut captured = Vec::with_capacity(max_output_bytes.min(16 * 1024));
     let mut truncated = false;
@@ -957,6 +1142,87 @@ esac
         assert!(delete.is_ok());
 
         assert!(fs::remove_dir_all(directory).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_returns_while_descendant_retains_inherited_streams() {
+        let (directory, script) =
+            fake_runtime("create-inherits-output", "#!/bin/sh\nsleep 2 &\nprintf 'created\n'\n");
+        let command = RuntimeCommand {
+            program: script,
+            args: vec![OsString::from("create")],
+        };
+        let began = Instant::now();
+        let result = RuntimeExecutor::new(RuntimeExecutionPolicy {
+            timeout: Duration::from_millis(500),
+            ..RuntimeExecutionPolicy::default()
+        })
+        .execute(&command);
+        assert!(result.is_ok(), "create should not wait for child EOF: {result:?}");
+        assert!(began.elapsed() < Duration::from_millis(900));
+        fs::remove_dir_all(directory).expect("clean test directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn noncreate_capture_does_not_wait_for_descendant_eof() {
+        let (directory, script) = fake_runtime(
+            "state-inherits-output",
+            "#!/bin/sh\nsleep 2 &\nprintf '{\"status\":\"running\"}\n'\n",
+        );
+        let command = RuntimeCommand {
+            program: script,
+            args: vec![OsString::from("state")],
+        };
+        let began = Instant::now();
+        let result = RuntimeExecutor::new(RuntimeExecutionPolicy {
+            timeout: Duration::from_millis(500),
+            ..RuntimeExecutionPolicy::default()
+        })
+        .execute(&command)
+        .expect("state must return without descendant EOF");
+        assert!(result.stdout.text_lossy().contains("running"));
+        assert!(began.elapsed() < Duration::from_millis(900));
+        fs::remove_dir_all(directory).expect("clean test directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn huge_poll_interval_respects_timeout() {
+        let command = RuntimeCommand {
+            program: PathBuf::from("/bin/sh"),
+            args: vec![OsString::from("-c"), OsString::from("exec sleep 5")],
+        };
+        let began = Instant::now();
+        let result = RuntimeExecutor::new(RuntimeExecutionPolicy {
+            timeout: Duration::from_millis(75),
+            poll_interval: Duration::from_secs(5),
+            ..RuntimeExecutionPolicy::default()
+        })
+        .execute(&command);
+        assert!(matches!(result, Err(RuntimeExecutionError::TimedOut { .. })));
+        assert!(began.elapsed() < Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nonzero_exit_preserves_stderr() {
+        let command = RuntimeCommand {
+            program: PathBuf::from("/bin/sh"),
+            args: vec![
+                OsString::from("-c"),
+                OsString::from("printf 'bad-state' >&2; exit 19"),
+            ],
+        };
+        match RuntimeExecutor::default().execute(&command) {
+            Err(RuntimeExecutionError::NonZeroExit {
+                code: Some(19),
+                stderr,
+                ..
+            }) => assert!(stderr.text_lossy().contains("bad-state")),
+            other => panic!("expected nonzero exit and stderr: {other:?}"),
+        }
     }
 
     #[cfg(unix)]
