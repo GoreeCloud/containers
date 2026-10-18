@@ -162,6 +162,7 @@ pub enum RuntimeError {
     EmptyVersionOutput {
         executable: PathBuf,
     },
+    ProbeExecution(RuntimeExecutionError),
     ExecutablePathNotAbsolute(PathBuf),
     ExecutableNotRegularFile(PathBuf),
     ExecutableNotExecutable(PathBuf),
@@ -201,6 +202,7 @@ impl fmt::Display for RuntimeError {
                 "OCI runtime '{}' returned no version output",
                 executable.display()
             ),
+            Self::ProbeExecution(source) => write!(formatter, "OCI runtime probe failed: {source}"),
             Self::ExecutablePathNotAbsolute(path) => write!(
                 formatter,
                 "OCI runtime executable path must be absolute for lifecycle execution: {}",
@@ -260,6 +262,7 @@ impl Error for RuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Spawn { source, .. } | Self::Io { source, .. } => Some(source),
+            Self::ProbeExecution(source) => Some(source),
             _ => None,
         }
     }
@@ -578,24 +581,39 @@ impl ProcessOciRuntime {
     }
 
     pub fn probe(&self) -> Result<RuntimeProbe, RuntimeError> {
-        let output = Command::new(&self.config.executable)
-            .arg("--version")
-            .output()
-            .map_err(|source| RuntimeError::Spawn {
-                executable: self.config.executable.clone(),
+        self.probe_with_executor(&RuntimeExecutor::default())
+    }
+
+    pub fn probe_with_executor(
+        &self,
+        executor: &RuntimeExecutor,
+    ) -> Result<RuntimeProbe, RuntimeError> {
+        let command = RuntimeCommand {
+            program: self.config.executable.clone(),
+            args: vec![OsString::from("--version")],
+        };
+        // Probing third-party binaries must have the same timeout and bounded
+        // output guarantees as the container lifecycle command executor.
+        let execution = executor.execute(&command).map_err(|error| match error {
+            RuntimeExecutionError::Spawn { program, source } => RuntimeError::Spawn {
+                executable: program,
                 source,
-            })?;
+            },
+            RuntimeExecutionError::NonZeroExit {
+                program,
+                code,
+                stderr,
+                ..
+            } => RuntimeError::NonZeroExit {
+                executable: program,
+                code,
+                stderr: stderr.text_lossy(),
+            },
+            other => RuntimeError::ProbeExecution(other),
+        })?;
 
-        if !output.status.success() {
-            return Err(RuntimeError::NonZeroExit {
-                executable: self.config.executable.clone(),
-                code: output.status.code(),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            });
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let stdout = execution.stdout.text_lossy().trim().to_owned();
+        let stderr = execution.stderr.text_lossy().trim().to_owned();
         let version_output = if stdout.is_empty() { stderr } else { stdout };
         if version_output.is_empty() {
             return Err(RuntimeError::EmptyVersionOutput {
@@ -862,6 +880,42 @@ mod tests {
             runtime.plan_delete(&id()).display_lossy(),
             "runc delete example"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_probe_limits_version_output() {
+        let (directory, script) = fake_runtime(
+            "bounded-probe",
+            "#!/bin/sh\nhead -c 1500000 /dev/zero | tr '\\000' 'x'\n",
+        );
+        let runtime = ProcessOciRuntime::new_for_execution(OciRuntimeKind::Runc, script)
+            .expect("fake runtime should be valid");
+        let probe = runtime.probe().expect("version output should be accepted");
+        assert_eq!(probe.version_output.len(), 1024 * 1024);
+        assert!(probe.version_output.starts_with('x'));
+        fs::remove_dir_all(directory).expect("test directory should be removable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_probe_times_out() {
+        let (directory, script) = fake_runtime(
+            "timed-probe",
+            "#!/bin/sh\nexec sleep 2\n",
+        );
+        let runtime = ProcessOciRuntime::new_for_execution(OciRuntimeKind::Crun, script)
+            .expect("fake runtime should be valid");
+        let executor = RuntimeExecutor::new(RuntimeExecutionPolicy {
+            timeout: Duration::from_millis(50),
+            poll_interval: Duration::from_millis(5),
+            ..RuntimeExecutionPolicy::default()
+        });
+        assert!(matches!(
+            runtime.probe_with_executor(&executor),
+            Err(RuntimeError::ProbeExecution(RuntimeExecutionError::TimedOut { .. }))
+        ));
+        fs::remove_dir_all(directory).expect("test directory should be removable");
     }
 
     #[cfg(unix)]
