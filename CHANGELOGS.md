@@ -1,5 +1,12 @@
 # GoreeCloud Containers — Changelogs
 
+## 2026-10-17 — Verified Development security stabilization
+
+- PR #8 merged on `main` with Unix owner-only creation of OCI bundle configurations and a regression test.
+- PR #9 merged on `main` with bounded runtime version probes and timeout/output-limit regression tests.
+- Draft PR #4 remains unmerged; successful source tests do not establish real OCI workload or rootless acceptance.
+- Docker remains the production runtime; Containers remains Development.
+
 ## 2026-09-27 — Project specification and project-record migration
 
 - Added repository-native PROJECT-SPECIFICATIONS.md and PROJECT-RECORD.md.
