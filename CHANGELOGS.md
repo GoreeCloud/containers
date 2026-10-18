@@ -1,5 +1,12 @@
 # GoreeCloud Containers — Changelogs
 
+## 2026-10-17 — Rootless procfs mount repair and isolated real-runc smoke
+
+- PR #16 was squash-merged into `main` as `94ae8f8ca1dfd9de57ee0e95be6cfe3ef9152ca9`; exact-head Rust CI `39091756467` and post-merge Rust CI `39091834775` passed.
+- The experimental rootless OCI profile now generates a narrowly typed `/proc` procfs mount and refuses missing or symlinked `rootfs/proc/` mountpoints before writing the OCI configuration.
+- A gated, disposable real-`runc` smoke test ran as a non-root user with its own temporary runtime state, verified user-namespace UID/GID mapping and actual procfs filesystem type within the workload, and exited successfully. It is not executed by ordinary CI.
+- This limited result does not establish complete GoreeCloud runtime lifecycle, OCI conformance, networking, storage/recovery, security/resource isolation, Compose compatibility, or production readiness; Docker remains in production.
+
 ## 2026-10-17 — OCI bundle publication input validation
 
 - PR #13 merged as `8ded53d25e090b3c2cc9f69e005ef28409a20072`; OCI `root.path` must match the verified bundle `rootfs`, and mutable process fields are revalidated before creating `config.json`.
