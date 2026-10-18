@@ -1,0 +1,18 @@
+[package]
+name = "goreecloud-containers-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+goreecloud-containers-image = { path = "../goreecloud-containers-image" }
+goreecloud-containers-oci = { path = "../goreecloud-containers-oci" }
+
+[dev-dependencies]
+goreecloud-containers-core = { path = "../goreecloud-containers-core" }
+goreecloud-containers-runtime = { path = "../goreecloud-containers-runtime" }
+
+[lints]
+workspace = true
