@@ -359,19 +359,17 @@ pub fn initialize_linux_bundle(
         options.mode(0o600);
     }
 
-    let mut file = options
-        .open(&config_path)
-        .map_err(|source| {
-            if source.kind() == io::ErrorKind::AlreadyExists {
-                OciConfigError::ConfigAlreadyExists(config_path.clone())
-            } else {
-                OciConfigError::Io {
-                    operation: "create OCI configuration",
-                    path: config_path.clone(),
-                    source,
-                }
+    let mut file = options.open(&config_path).map_err(|source| {
+        if source.kind() == io::ErrorKind::AlreadyExists {
+            OciConfigError::ConfigAlreadyExists(config_path.clone())
+        } else {
+            OciConfigError::Io {
+                operation: "create OCI configuration",
+                path: config_path.clone(),
+                source,
             }
-        })?;
+        }
+    })?;
 
     file.write_all(config.to_json_pretty().as_bytes())
         .map_err(|source| OciConfigError::Io {
@@ -475,8 +473,8 @@ mod tests {
 
         let config = OciConfig::minimal_linux(vec!["/bin/true".to_owned()])
             .expect("minimal OCI config should be valid");
-        let initialized = initialize_linux_bundle(&directory, &config)
-            .expect("OCI bundle should initialize");
+        let initialized =
+            initialize_linux_bundle(&directory, &config).expect("OCI bundle should initialize");
 
         let permissions = fs::metadata(&initialized.config_path)
             .expect("config metadata should be readable")
