@@ -1257,7 +1257,10 @@ esac
             .set_nonblocking(true)
             .expect("nonblocking diagnostic reader");
         let packet = vec![b'x'; 12_000];
-        assert_eq!(writer.send(&packet).expect("send oversized packet"), packet.len());
+        assert_eq!(
+            writer.send(&packet).expect("send oversized packet"),
+            packet.len()
+        );
 
         let mut output = CapturedOutput {
             bytes: Vec::new(),
