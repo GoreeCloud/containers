@@ -411,9 +411,12 @@ fn create_staging_directory(parent: &Path) -> Result<PathBuf, EngineError> {
             ".goreecloud-bundle-stage-{}-{sequence}",
             std::process::id()
         ));
-        match fs::create_dir(&stage) {
+        match create_private_directory(&stage) {
             Ok(()) => {
-                set_private_directory_permissions(&stage)?;
+                if let Err(error) = set_private_directory_permissions(&stage) {
+                    let _ = fs::remove_dir(&stage);
+                    return Err(error);
+                }
                 return Ok(stage);
             }
             Err(source) if source.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -450,7 +453,7 @@ fn publish_staged_bundle(
         ));
     }
 
-    fs::create_dir(bundle_target).map_err(|source| {
+    create_private_directory(bundle_target).map_err(|source| {
         if source.kind() == io::ErrorKind::AlreadyExists {
             EngineError::BundleTargetAlreadyExists(bundle_target.to_path_buf())
         } else {
@@ -508,6 +511,21 @@ fn publish_staged_bundle(
         rootfs_path: target_rootfs,
         config_path: target_config,
     })
+}
+
+// Apply owner-only permissions at creation time, before a staging or
+// published bundle directory can become visible under a permissive umask.
+#[cfg(unix)]
+fn create_private_directory(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    let mut builder = fs::DirBuilder::new();
+    builder.mode(0o700);
+    builder.create(path)
+}
+
+#[cfg(not(unix))]
+fn create_private_directory(path: &Path) -> io::Result<()> {
+    fs::create_dir(path)
 }
 
 #[cfg(unix)]
@@ -689,6 +707,23 @@ mod tests {
             Err(EngineError::BundleTargetAlreadyExists(_))
         ));
         fs::remove_dir_all(&parent).expect("test parent should be removed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staging_directory_is_private_from_creation() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let parent = test_parent("private-stage");
+        let stage = create_staging_directory(&parent).expect("private staging directory");
+        let permissions = fs::metadata(&stage)
+            .expect("staging directory metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(permissions, 0o700);
+        fs::remove_dir(&stage).expect("remove empty staging directory");
+        fs::remove_dir_all(parent).expect("remove test parent");
     }
 
     #[test]
