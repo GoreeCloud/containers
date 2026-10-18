@@ -1218,6 +1218,35 @@ esac
 
     #[cfg(unix)]
     #[test]
+    fn create_diagnostic_capture_respects_output_limit() {
+        use std::os::unix::net::UnixDatagram;
+
+        let (reader, writer) = UnixDatagram::pair().expect("create diagnostic socket");
+        reader
+            .set_nonblocking(true)
+            .expect("nonblocking diagnostic reader");
+        assert_eq!(
+            writer.send(&[b'x'; 96]).expect("send bounded diagnostic"),
+            96
+        );
+        let mut output = CapturedOutput {
+            bytes: Vec::new(),
+            truncated: false,
+        };
+        drain_nonblocking_datagrams(&reader, &mut output, 17)
+            .expect("capture diagnostic with a strict byte limit");
+        assert_eq!(output.bytes, vec![b'x'; 17]);
+        assert!(output.truncated);
+
+        writer.send(b"more").expect("send additional diagnostic");
+        drain_nonblocking_datagrams(&reader, &mut output, 17)
+            .expect("discard additional data beyond capture limit");
+        assert_eq!(output.bytes.len(), 17);
+        assert!(output.truncated);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn create_preserves_bounded_failure_diagnostics() {
         let (directory, script) = fake_runtime(
             "create-failure-diagnostics",
