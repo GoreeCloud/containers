@@ -92,6 +92,7 @@ pub enum LinuxNamespaceType {
     Ipc,
     Uts,
     Mount,
+    User,
 }
 
 impl LinuxNamespaceType {
@@ -103,13 +104,23 @@ impl LinuxNamespaceType {
             Self::Ipc => "ipc",
             Self::Uts => "uts",
             Self::Mount => "mount",
+            Self::User => "user",
         }
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OciIdMapping {
+    pub container_id: u32,
+    pub host_id: u32,
+    pub size: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OciLinux {
     pub namespaces: Vec<LinuxNamespaceType>,
+    pub uid_mappings: Vec<OciIdMapping>,
+    pub gid_mappings: Vec<OciIdMapping>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -139,8 +150,40 @@ impl OciConfig {
                     LinuxNamespaceType::Uts,
                     LinuxNamespaceType::Mount,
                 ],
+                uid_mappings: Vec::new(),
+                gid_mappings: Vec::new(),
             },
         })
+    }
+
+    /// Construct a Development-only rootless OCI profile with a single
+    /// subordinate mapping of container root to the invoking host user.
+    ///
+    /// Real runtime lifecycle, filesystem, and isolation acceptance remain
+    /// separate requirements; this only builds an OCI configuration.
+    pub fn minimal_rootless_linux(
+        args: Vec<String>,
+        host_uid: u32,
+        host_gid: u32,
+    ) -> Result<Self, OciConfigError> {
+        if host_uid == 0 || host_gid == 0 {
+            return Err(OciConfigError::RootlessHostIdMustBeUnprivileged);
+        }
+        let mut config = Self::minimal_linux(args)?;
+        config.process.user = OciUser { uid: 0, gid: 0 };
+        config.root.readonly = true;
+        config.linux.namespaces.push(LinuxNamespaceType::User);
+        config.linux.uid_mappings = vec![OciIdMapping {
+            container_id: 0,
+            host_id: host_uid,
+            size: 1,
+        }];
+        config.linux.gid_mappings = vec![OciIdMapping {
+            container_id: 0,
+            host_id: host_gid,
+            size: 1,
+        }];
+        Ok(config)
     }
 
     #[must_use]
@@ -192,7 +235,16 @@ impl OciConfig {
             push_json_string(&mut output, namespace.as_str());
             output.push('}');
         }
-        output.push_str("]\n  }\n}\n");
+        output.push(']');
+        if !self.linux.uid_mappings.is_empty() {
+            output.push_str(",\n    \"uidMappings\": ");
+            push_id_mappings(&mut output, &self.linux.uid_mappings);
+        }
+        if !self.linux.gid_mappings.is_empty() {
+            output.push_str(",\n    \"gidMappings\": ");
+            push_id_mappings(&mut output, &self.linux.gid_mappings);
+        }
+        output.push_str("\n  }\n}\n");
         output
     }
 }
@@ -208,6 +260,7 @@ pub struct InitializedBundle {
 pub enum OciConfigError {
     MissingProcessArgs,
     EmptyProcessArg,
+    RootlessHostIdMustBeUnprivileged,
     InvalidEnvironmentEntry,
     CwdNotAbsolute(String),
     BundlePathNotAbsolute(PathBuf),
@@ -231,6 +284,9 @@ impl fmt::Display for OciConfigError {
             }
             Self::EmptyProcessArg => {
                 formatter.write_str("OCI process arguments must not contain empty values")
+            }
+            Self::RootlessHostIdMustBeUnprivileged => {
+                formatter.write_str("rootless host UID and GID must both be nonzero")
             }
             Self::InvalidEnvironmentEntry => {
                 formatter.write_str("OCI environment entries must use non-empty NAME=VALUE form")
@@ -390,6 +446,21 @@ pub fn initialize_linux_bundle(
     })
 }
 
+fn push_id_mappings(output: &mut String, mappings: &[OciIdMapping]) {
+    output.push('[');
+    for (index, mapping) in mappings.iter().enumerate() {
+        if index != 0 {
+            output.push_str(", ");
+        }
+        let _ = write!(
+            output,
+            "{{\"containerID\": {}, \"hostID\": {}, \"size\": {}}}",
+            mapping.container_id, mapping.host_id, mapping.size
+        );
+    }
+    output.push(']');
+}
+
 fn push_json_string_array(output: &mut String, values: &[String]) {
     output.push('[');
     for (index, value) in values.iter().enumerate() {
@@ -452,6 +523,58 @@ mod tests {
         assert!(json.contains("\"path\": \"rootfs\""));
         assert!(json.contains("hello \\\"GoreeCloud\\\""));
         assert!(json.ends_with("}\n"));
+    }
+
+    #[test]
+    fn rootless_profile_maps_container_root_to_nonroot_host_identity() {
+        let config = OciConfig::minimal_rootless_linux(vec!["/bin/true".to_owned()], 1001, 1002)
+            .expect("non-root host identities should be accepted");
+
+        assert_eq!(config.process.user, OciUser { uid: 0, gid: 0 });
+        assert!(config.process.no_new_privileges);
+        assert!(config.root.readonly);
+        assert!(config.linux.namespaces.contains(&LinuxNamespaceType::User));
+        assert_eq!(
+            config.linux.uid_mappings,
+            vec![OciIdMapping {
+                container_id: 0,
+                host_id: 1001,
+                size: 1
+            }]
+        );
+        assert_eq!(
+            config.linux.gid_mappings,
+            vec![OciIdMapping {
+                container_id: 0,
+                host_id: 1002,
+                size: 1
+            }]
+        );
+        let json = config.to_json_pretty();
+        assert!(json.contains("\"type\": \"user\""));
+        assert!(
+            json.contains("\"uidMappings\": [{\"containerID\": 0, \"hostID\": 1001, \"size\": 1}]")
+        );
+        assert!(
+            json.contains("\"gidMappings\": [{\"containerID\": 0, \"hostID\": 1002, \"size\": 1}]")
+        );
+    }
+
+    #[test]
+    fn rootless_profile_rejects_host_root_identities() {
+        let args = vec!["/bin/true".to_owned()];
+        for (uid, gid) in [(0, 1000), (1000, 0), (0, 0)] {
+            assert!(matches!(
+                OciConfig::minimal_rootless_linux(args.clone(), uid, gid),
+                Err(OciConfigError::RootlessHostIdMustBeUnprivileged)
+            ));
+        }
+
+        let ordinary = OciConfig::minimal_linux(args).expect("ordinary config should work");
+        assert!(ordinary.linux.uid_mappings.is_empty());
+        assert!(ordinary.linux.gid_mappings.is_empty());
+        assert!(!ordinary.to_json_pretty().contains("\"uidMappings\""));
+        assert!(!ordinary.to_json_pretty().contains("\"gidMappings\""));
     }
 
     #[test]

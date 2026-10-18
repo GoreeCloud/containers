@@ -59,6 +59,32 @@ fn run_bundle(mut args: impl Iterator<Item = String>) -> Result<(), String> {
             println!("config: {}", initialized.config_path.display());
             Ok(())
         }
+        Some("init-rootless") => {
+            let bundle = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "missing absolute bundle path".to_owned())?,
+            );
+            let host_uid = args
+                .next()
+                .ok_or_else(|| "missing host UID".to_owned())?
+                .parse::<u32>()
+                .map_err(|_| "host UID must be a number".to_owned())?;
+            let host_gid = args
+                .next()
+                .ok_or_else(|| "missing host GID".to_owned())?
+                .parse::<u32>()
+                .map_err(|_| "host GID must be a number".to_owned())?;
+            let process_args: Vec<String> = args.collect();
+            let config = OciConfig::minimal_rootless_linux(process_args, host_uid, host_gid)
+                .map_err(|error| error.to_string())?;
+            let initialized =
+                initialize_linux_bundle(&bundle, &config).map_err(|error| error.to_string())?;
+            println!("bundle: {}", initialized.bundle_path.display());
+            println!("rootfs: {}", initialized.rootfs_path.display());
+            println!("config: {}", initialized.config_path.display());
+            println!("profile: experimental rootless (execution not accepted)");
+            Ok(())
+        }
         Some(command) => Err(format!(
             "unknown bundle command '{command}'\n\n{}",
             help_text()
@@ -295,5 +321,5 @@ fn print_help() {
 }
 
 fn help_text() -> &'static str {
-    "GoreeCloud Containers Development CLI\n\nUsage:\n  goree version\n  goree bundle init <absolute-bundle> <command> [args...]\n  goree image ingest <sha256:digest> <absolute-source-file> <absolute-store-root> [max-content-bytes]\n  goree image pull <registry-base-url> <repository> <tag-or-sha256-digest> <absolute-store-root> <absolute-new-rootfs>\n  goree runtime probe [crun|runc] [executable]\n  goree runtime create <crun|runc> <absolute-executable> <container-id> <absolute-bundle>\n  goree runtime start <crun|runc> <absolute-executable> <container-id>\n  goree runtime state <crun|runc> <absolute-executable> <container-id>\n  goree runtime delete <crun|runc> <absolute-executable> <container-id>\n  goree container validate-id <container-id>\n\nImage retrieval, rootfs construction, and lifecycle execution are Development-only. Registry credential authentication, image-index selection, symbolic-link/hard-link layer entries, real registry/runtime acceptance, rootless, and production acceptance remain pending."
+    "GoreeCloud Containers Development CLI\n\nUsage:\n  goree version\n  goree bundle init <absolute-bundle> <command> [args...]\n  goree bundle init-rootless <absolute-bundle> <host-uid> <host-gid> <command> [args...]\n  goree image ingest <sha256:digest> <absolute-source-file> <absolute-store-root> [max-content-bytes]\n  goree image pull <registry-base-url> <repository> <tag-or-sha256-digest> <absolute-store-root> <absolute-new-rootfs>\n  goree runtime probe [crun|runc] [executable]\n  goree runtime create <crun|runc> <absolute-executable> <container-id> <absolute-bundle>\n  goree runtime start <crun|runc> <absolute-executable> <container-id>\n  goree runtime state <crun|runc> <absolute-executable> <container-id>\n  goree runtime delete <crun|runc> <absolute-executable> <container-id>\n  goree container validate-id <container-id>\n\nImage retrieval, rootfs construction, and lifecycle execution are Development-only. Registry credential authentication, image-index selection, symbolic-link/hard-link layer entries, real registry/runtime acceptance, rootless execution, and production acceptance remain pending. The rootless bundle profile is experimental and only generates configuration."
 }
