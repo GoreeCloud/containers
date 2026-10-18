@@ -17,4 +17,4 @@ GoreeCloud Containers is an original GoreeCloud project. Competitive objectives 
 
 ## Current comparison boundary
 
-The current Development source is far narrower than mature Docker or Podman installations. It does not yet provide image pulling, root filesystem construction, accepted runtime execution, networking, volumes, Compose, builds, or production management. Those gaps must be closed through implementation and validation rather than marketing claims.
+The current Development source is narrower than Docker and Podman. Supported Development image ingest/pull and restricted rootfs construction exist, but accepted real runtime execution, rootless validation, durable state, production networking/volumes, Compose, builds, and production management remain outstanding. See [BENEFITS.md](BENEFITS.md) for the hosting comparison.
