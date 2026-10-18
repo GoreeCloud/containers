@@ -5,7 +5,15 @@
 **Project:** GoreeCloud Containers
 **Repository:** GoreeCloud/containers
 **Authority:** Repository-local project record
-**Last Updated:** 2026-09-27
+**Last Updated:** 2026-10-17
+
+## 2026-10-17 — Accepted Development security milestones
+
+PR #8 was merged on `main` as `46b89ee9fce2f69d1c401208f15f9a7aec51e250`. New OCI bundle configurations use Unix mode `0600` and the regression test passed.
+
+PR #9 was merged as `6d49227d44beb05885d757641fe04a9e3880ffea`. Runtime version probes now use bounded execution, with timeout and output-limit regression tests. Both merges passed post-merge Rust CI.
+
+Draft PR #4 remains unmerged, including additional Development-only bundle creation and runtime cleanup tests. Real workload, rootless, and production acceptance are not established. Docker remains production runtime.
 
 ## 2026-09-27 — Repository-local project migration staged
 
