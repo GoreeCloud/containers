@@ -72,6 +72,25 @@ type inside the container, and cleanup. It does not use the production Docker
 runtime or prove full OCI conformance, network isolation, persistent state,
 recovery, or GoreeCloud's higher-level engine lifecycle.
 
+### Optional GoreeCloud CLI real-runtime lifecycle smoke
+
+The additional **explicitly opt-in** Development check uses the GoreeCloud CLI
+for `create`, `state`, `start`, and `delete` with an isolated, disposable
+rootless `runc` container. It verifies the workload output and final state:
+
+```bash
+cargo build -p goree
+GOREECLOUD_CONTAINERS_REAL_CLI_LIFECYCLE=1 bash scripts/real-rootless-cli-lifecycle.sh
+```
+
+The test employs a **test-only runtime wrapper** to redirect `runc create`
+stdout/stderr into private temporary files. This is necessary because the
+current runtime executor can wait indefinitely when a newly created container
+retains the command's output pipes. The ordinary executor still requires a
+direct fix and regression coverage; this wrapper must not be used as a
+production runtime adapter. The test does not establish general lifecycle
+acceptance, network/storage reliability, OCI conformance, or Docker replacement.
+
 ## Important acceptance boundaries
 
 The current repository does not establish:
