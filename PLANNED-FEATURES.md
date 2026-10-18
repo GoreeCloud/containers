@@ -34,6 +34,7 @@ Implementation state belongs in IMPLEMENTED-FEATURES.md. Significant project his
 | CONTAINERS-013 | Integrate applicable Manager, Identity, Wardveil Security, Privacy Shield, Everkeep, Mesh, Metrics, and Glaze UI requirements. | High | Blocked / future |
 | CONTAINERS-014 | Reconcile the repository Platform Contract declaration with current GoreeCloud platform governance. | High | Required before production qualification |
 | CONTAINERS-015 | Preserve Docker as production runtime authority until migration pilots, rollback, recovery, compatibility, and production gates are separately accepted. | Critical | Governing boundary |
+| CONTAINERS-016 | Accept timeout reconciliation for OCI child/descendant processes and runtime-owned state: verify precise ownership, targeted state inspection/cleanup, delayed init survival where intended, bounded retries, and no signals to unrelated processes. | Critical | Reproduction verified; lifecycle reconciliation pending |
 
 ## Maintenance
 
