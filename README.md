@@ -39,6 +39,21 @@ Current accepted capabilities include:
 - deterministic fixture-registry and fake-runtime tests;
 - Rust CI and Platform Contract validation.
 
+## Experimental rootless OCI bundle configuration
+
+The Development CLI can generate a rootless **configuration candidate** for
+a pre-existing bundle with a `rootfs/` directory:
+
+```bash
+cargo run -p goree -- bundle init-rootless /absolute/bundle 1000 1000 /bin/true
+```
+
+Use the actual unprivileged host UID and GID, not root. This constructs a
+user namespace with single-ID mappings, an unprivileged host identity, a
+read-only root filesystem, and `noNewPrivileges`. It does **not** execute
+a container, initialize networking or volumes, prove UID mapping on the target
+runtime, or qualify rootless production support.
+
 ## Important acceptance boundaries
 
 The current repository does not establish:
