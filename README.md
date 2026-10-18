@@ -42,17 +42,35 @@ Current accepted capabilities include:
 ## Experimental rootless OCI bundle configuration
 
 The Development CLI can generate a rootless **configuration candidate** for
-a pre-existing bundle with a `rootfs/` directory:
+a pre-existing bundle with `rootfs/` and a real (non-symlink) `rootfs/proc/` directory:
 
 ```bash
 cargo run -p goree -- bundle init-rootless /absolute/bundle 1000 1000 /bin/true
 ```
 
-Use the actual unprivileged host UID and GID, not root. This constructs a
-user namespace with single-ID mappings, an unprivileged host identity, a
-read-only root filesystem, and `noNewPrivileges`. It does **not** execute
+Use the actual unprivileged host UID and GID, not root. A genuine, non-symlink
+`rootfs/proc/` mountpoint must already exist; the generated profile declares a
+restricted procfs mount for it. This constructs a user namespace with single-ID
+mappings, an unprivileged host identity, a read-only root filesystem, and
+`noNewPrivileges`. It does **not** execute
 a container, initialize networking or volumes, prove UID mapping on the target
 runtime, or qualify rootless production support.
+
+### Optional real-runtime smoke test
+
+On a non-root Linux development host with `runc`, a static-capable C compiler,
+`timeout`, and `jq`, the following **explicitly opt-in** check constructs a
+disposable root filesystem and uses a separate temporary runc state directory:
+
+```bash
+cargo build -p goree
+GOREECLOUD_CONTAINERS_REAL_ROOTLESS_SMOKE=1 bash scripts/real-rootless-runc-smoke.sh
+```
+
+The smoke test verifies the generated UID/GID mappings, `/proc` filesystem
+type inside the container, and cleanup. It does not use the production Docker
+runtime or prove full OCI conformance, network isolation, persistent state,
+recovery, or GoreeCloud's higher-level engine lifecycle.
 
 ## Important acceptance boundaries
 

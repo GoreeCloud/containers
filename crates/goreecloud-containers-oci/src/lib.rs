@@ -118,6 +118,13 @@ impl LinuxNamespaceType {
     }
 }
 
+/// A narrowly allowed mount type. Only a private procfs mount is presently
+/// available in Development; arbitrary host mounts are deliberately excluded.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OciMount {
+    Proc,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OciIdMapping {
     pub container_id: u32,
@@ -138,6 +145,7 @@ pub struct OciConfig {
     pub process: OciProcess,
     pub root: OciRoot,
     pub hostname: Option<String>,
+    pub mounts: Vec<OciMount>,
     pub linux: OciLinux,
 }
 
@@ -151,6 +159,7 @@ impl OciConfig {
                 readonly: false,
             },
             hostname: Some("goree-container".to_owned()),
+            mounts: Vec::new(),
             linux: OciLinux {
                 namespaces: vec![
                     LinuxNamespaceType::Pid,
@@ -181,6 +190,7 @@ impl OciConfig {
         let mut config = Self::minimal_linux(args)?;
         config.process.user = OciUser { uid: 0, gid: 0 };
         config.root.readonly = true;
+        config.mounts.push(OciMount::Proc);
         config.linux.namespaces.push(LinuxNamespaceType::User);
         config.linux.uid_mappings = vec![OciIdMapping {
             container_id: 0,
@@ -235,6 +245,21 @@ impl OciConfig {
             push_json_string(&mut output, hostname);
         }
 
+        if !self.mounts.is_empty() {
+            output.push_str(",\n  \"mounts\": [");
+            for (index, mount) in self.mounts.iter().enumerate() {
+                if index != 0 {
+                    output.push_str(", ");
+                }
+                match mount {
+                    OciMount::Proc => output.push_str(
+                        "{\"destination\": \"/proc\", \"type\": \"proc\", \"source\": \"proc\"}",
+                    ),
+                }
+            }
+            output.push(']');
+        }
+
         output.push_str(",\n  \"linux\": {\n    \"namespaces\": [");
         for (index, namespace) in self.linux.namespaces.iter().enumerate() {
             if index != 0 {
@@ -280,6 +305,7 @@ pub enum OciConfigError {
     BundleNotDirectory(PathBuf),
     RootfsPathSymlink(PathBuf),
     RootfsNotDirectory(PathBuf),
+    InvalidProcMountpoint(PathBuf),
     ConfigAlreadyExists(PathBuf),
     Io {
         operation: &'static str,
@@ -336,6 +362,11 @@ impl fmt::Display for OciConfigError {
             Self::RootfsNotDirectory(path) => write!(
                 formatter,
                 "OCI root filesystem path is not a directory: {}",
+                path.display()
+            ),
+            Self::InvalidProcMountpoint(path) => write!(
+                formatter,
+                "OCI proc mountpoint must be an existing regular directory: {}",
                 path.display()
             ),
             Self::ConfigAlreadyExists(path) => write!(
@@ -422,6 +453,24 @@ pub fn initialize_linux_bundle(
     }
     if !rootfs_metadata.is_dir() {
         return Err(OciConfigError::RootfsNotDirectory(rootfs_path));
+    }
+
+    if config.mounts.contains(&OciMount::Proc) {
+        let proc_path = rootfs_path.join("proc");
+        match fs::symlink_metadata(&proc_path) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => return Err(OciConfigError::InvalidProcMountpoint(proc_path)),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                return Err(OciConfigError::InvalidProcMountpoint(proc_path));
+            }
+            Err(source) => {
+                return Err(OciConfigError::Io {
+                    operation: "inspect OCI proc mountpoint",
+                    path: proc_path,
+                    source,
+                });
+            }
+        }
     }
 
     let config_path = canonical_bundle.join(OCI_CONFIG_FILENAME);
@@ -612,6 +661,7 @@ mod tests {
         assert_eq!(config.process.user, OciUser { uid: 0, gid: 0 });
         assert!(config.process.no_new_privileges);
         assert!(config.root.readonly);
+        assert_eq!(config.mounts, vec![OciMount::Proc]);
         assert!(config.linux.namespaces.contains(&LinuxNamespaceType::User));
         assert_eq!(
             config.linux.uid_mappings,
@@ -631,12 +681,49 @@ mod tests {
         );
         let json = config.to_json_pretty();
         assert!(json.contains("\"type\": \"user\""));
+        assert!(json.contains(
+            "\"mounts\": [{\"destination\": \"/proc\", \"type\": \"proc\", \"source\": \"proc\"}]"
+        ));
         assert!(
             json.contains("\"uidMappings\": [{\"containerID\": 0, \"hostID\": 1001, \"size\": 1}]")
         );
         assert!(
             json.contains("\"gidMappings\": [{\"containerID\": 0, \"hostID\": 1002, \"size\": 1}]")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rootless_proc_mountpoint_must_exist_and_must_not_be_a_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let directory = temporary_directory("rootless-proc-mountpoint");
+        let rootfs = directory.join(DEFAULT_ROOTFS_DIRECTORY);
+        fs::create_dir_all(&rootfs).expect("create rootfs fixture");
+        let proc_path = rootfs.join("proc");
+        let config = OciConfig::minimal_rootless_linux(vec!["/bin/true".to_owned()], 1001, 1001)
+            .expect("construct rootless OCI profile");
+
+        assert!(matches!(
+            initialize_linux_bundle(&directory, &config),
+            Err(OciConfigError::InvalidProcMountpoint(_))
+        ));
+        assert!(!directory.join(OCI_CONFIG_FILENAME).exists());
+
+        symlink("../outside", &proc_path).expect("create rejected mountpoint symlink");
+        assert!(matches!(
+            initialize_linux_bundle(&directory, &config),
+            Err(OciConfigError::InvalidProcMountpoint(_))
+        ));
+        assert!(!directory.join(OCI_CONFIG_FILENAME).exists());
+
+        fs::remove_file(&proc_path).expect("remove symlink");
+        fs::create_dir(&proc_path).expect("create safe proc mountpoint");
+        let initialized =
+            initialize_linux_bundle(&directory, &config).expect("publish valid rootless config");
+        let emitted = fs::read_to_string(&initialized.config_path).expect("read OCI config");
+        assert!(emitted.contains(r#""destination": "/proc""#));
+        fs::remove_dir_all(directory).expect("clean up fixture");
     }
 
     #[test]
