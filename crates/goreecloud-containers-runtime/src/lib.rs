@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
 use std::thread;
+#[cfg(not(unix))]
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -426,6 +427,206 @@ impl RuntimeExecutor {
         self.policy
     }
 
+    #[cfg(unix)]
+    fn execute(&self, command: &RuntimeCommand) -> Result<RuntimeExecution, RuntimeExecutionError> {
+        use std::os::fd::OwnedFd;
+        use std::os::unix::net::{UnixDatagram, UnixStream};
+
+        // OCI create may leave stopped init processes holding stdout/stderr.
+        // A datagram endpoint safely captures create errors while the parent
+        // runs: when the reader closes, later descendant writes cannot trigger
+        // SIGPIPE, unlike a stream pipe. Other commands retain stream capture.
+        let creating_container = command.args.first().is_some_and(|arg| arg == "create");
+        let (mut stdout_reader, stdout_writer) =
+            UnixStream::pair().map_err(|source| RuntimeExecutionError::Spawn {
+                program: command.program.clone(),
+                source,
+            })?;
+        let (mut stderr_reader, stderr_writer) =
+            UnixStream::pair().map_err(|source| RuntimeExecutionError::Spawn {
+                program: command.program.clone(),
+                source,
+            })?;
+        stdout_reader
+            .set_nonblocking(true)
+            .map_err(|source| RuntimeExecutionError::Read {
+                stream: "stdout",
+                source,
+            })?;
+        stderr_reader
+            .set_nonblocking(true)
+            .map_err(|source| RuntimeExecutionError::Read {
+                stream: "stderr",
+                source,
+            })?;
+        let (mut create_stderr_reader, create_stderr_writer) = if creating_container {
+            let (reader, writer) =
+                UnixDatagram::pair().map_err(|source| RuntimeExecutionError::Spawn {
+                    program: command.program.clone(),
+                    source,
+                })?;
+            reader
+                .set_nonblocking(true)
+                .map_err(|source| RuntimeExecutionError::Read {
+                    stream: "stderr",
+                    source,
+                })?;
+            (Some(reader), Some(writer))
+        } else {
+            (None, None)
+        };
+
+        let mut invocation = Command::new(&command.program);
+        invocation.args(&command.args).stdin(Stdio::null());
+        if creating_container {
+            invocation.stdout(Stdio::null());
+            let stderr: OwnedFd = create_stderr_writer
+                .expect("create always has a diagnostic socket")
+                .into();
+            invocation.stderr(Stdio::from(stderr));
+        } else {
+            let stdout: OwnedFd = stdout_writer.into();
+            let stderr: OwnedFd = stderr_writer.into();
+            invocation
+                .stdout(Stdio::from(stdout))
+                .stderr(Stdio::from(stderr));
+        }
+
+        let started = Instant::now();
+        let mut child = invocation
+            .spawn()
+            .map_err(|source| RuntimeExecutionError::Spawn {
+                program: command.program.clone(),
+                source,
+            })?;
+        let mut stdout = CapturedOutput {
+            bytes: Vec::new(),
+            truncated: false,
+        };
+        let mut stderr = CapturedOutput {
+            bytes: Vec::new(),
+            truncated: false,
+        };
+        let cadence = self.policy.poll_interval.max(Duration::from_millis(1));
+
+        let status = loop {
+            if let Some(reader) = &mut create_stderr_reader {
+                drain_nonblocking_datagrams(
+                    reader,
+                    &mut stderr,
+                    self.policy.max_output_bytes_per_stream,
+                )?;
+            } else {
+                drain_nonblocking(
+                    &mut stdout_reader,
+                    &mut stdout,
+                    self.policy.max_output_bytes_per_stream,
+                    "stdout",
+                )?;
+                drain_nonblocking(
+                    &mut stderr_reader,
+                    &mut stderr,
+                    self.policy.max_output_bytes_per_stream,
+                    "stderr",
+                )?;
+            }
+            match child
+                .try_wait()
+                .map_err(|source| RuntimeExecutionError::Wait {
+                    program: command.program.clone(),
+                    source,
+                })? {
+                Some(status) => {
+                    // Never wait for EOF: OCI descendants may keep the write
+                    // side open after the command process has exited.
+                    for _ in 0..16 {
+                        if let Some(reader) = &mut create_stderr_reader {
+                            drain_nonblocking_datagrams(
+                                reader,
+                                &mut stderr,
+                                self.policy.max_output_bytes_per_stream,
+                            )?;
+                        } else {
+                            drain_nonblocking(
+                                &mut stdout_reader,
+                                &mut stdout,
+                                self.policy.max_output_bytes_per_stream,
+                                "stdout",
+                            )?;
+                            drain_nonblocking(
+                                &mut stderr_reader,
+                                &mut stderr,
+                                self.policy.max_output_bytes_per_stream,
+                                "stderr",
+                            )?;
+                        }
+                    }
+                    break status;
+                }
+                None if started.elapsed() >= self.policy.timeout => {
+                    if let Err(source) = child.kill() {
+                        if source.kind() != io::ErrorKind::InvalidInput {
+                            return Err(RuntimeExecutionError::Kill {
+                                program: command.program.clone(),
+                                source,
+                            });
+                        }
+                    }
+                    child.wait().map_err(|source| RuntimeExecutionError::Wait {
+                        program: command.program.clone(),
+                        source,
+                    })?;
+                    if let Some(reader) = &mut create_stderr_reader {
+                        drain_nonblocking_datagrams(
+                            reader,
+                            &mut stderr,
+                            self.policy.max_output_bytes_per_stream,
+                        )?;
+                    } else {
+                        drain_nonblocking(
+                            &mut stdout_reader,
+                            &mut stdout,
+                            self.policy.max_output_bytes_per_stream,
+                            "stdout",
+                        )?;
+                        drain_nonblocking(
+                            &mut stderr_reader,
+                            &mut stderr,
+                            self.policy.max_output_bytes_per_stream,
+                            "stderr",
+                        )?;
+                    }
+                    return Err(RuntimeExecutionError::TimedOut {
+                        program: command.program.clone(),
+                        timeout: self.policy.timeout,
+                        stdout,
+                        stderr,
+                    });
+                }
+                None => {
+                    let remaining = self.policy.timeout.saturating_sub(started.elapsed());
+                    thread::sleep(cadence.min(remaining));
+                }
+            }
+        };
+
+        if status.success() {
+            Ok(RuntimeExecution {
+                code: status.code(),
+                stdout,
+                stderr,
+            })
+        } else {
+            Err(RuntimeExecutionError::NonZeroExit {
+                program: command.program.clone(),
+                code: status.code(),
+                stdout,
+                stderr,
+            })
+        }
+    }
+
+    #[cfg(not(unix))]
     fn execute(&self, command: &RuntimeCommand) -> Result<RuntimeExecution, RuntimeExecutionError> {
         let mut child = Command::new(&command.program)
             .args(&command.args)
@@ -510,6 +711,61 @@ impl Default for RuntimeExecutor {
     }
 }
 
+#[cfg(unix)]
+fn drain_nonblocking(
+    reader: &mut std::os::unix::net::UnixStream,
+    captured: &mut CapturedOutput,
+    limit: usize,
+    stream: &'static str,
+) -> Result<(), RuntimeExecutionError> {
+    // Bound the work per pass, even if a runtime is continuously writing.
+    let mut chunk = [0_u8; 8192];
+    for _ in 0..8 {
+        match reader.read(&mut chunk) {
+            Ok(0) => return Ok(()),
+            Ok(count) => {
+                let keep = limit.saturating_sub(captured.bytes.len()).min(count);
+                captured.bytes.extend_from_slice(&chunk[..keep]);
+                captured.truncated |= keep != count;
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(source) => return Err(RuntimeExecutionError::Read { stream, source }),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn drain_nonblocking_datagrams(
+    reader: &std::os::unix::net::UnixDatagram,
+    captured: &mut CapturedOutput,
+    limit: usize,
+) -> Result<(), RuntimeExecutionError> {
+    let mut chunk = [0_u8; 8192];
+    for _ in 0..8 {
+        match reader.recv(&mut chunk) {
+            Ok(count) => {
+                let keep = limit.saturating_sub(captured.bytes.len()).min(count);
+                captured.bytes.extend_from_slice(&chunk[..keep]);
+                // SOCK_DGRAM discards an oversized packet tail when recv's
+                // buffer is full. Conservatively flag that possibility.
+                captured.truncated |= keep != count || count == chunk.len();
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(source) => {
+                return Err(RuntimeExecutionError::Read {
+                    stream: "stderr",
+                    source,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
 fn finish_capture(
     stdout_reader: JoinHandle<io::Result<CapturedOutput>>,
     stderr_reader: JoinHandle<io::Result<CapturedOutput>>,
@@ -519,6 +775,7 @@ fn finish_capture(
     Ok((stdout_result?, stderr_result?))
 }
 
+#[cfg(not(unix))]
 fn join_capture(
     reader: JoinHandle<io::Result<CapturedOutput>>,
     stream: &'static str,
@@ -530,6 +787,7 @@ fn join_capture(
     }
 }
 
+#[cfg(not(unix))]
 fn read_bounded(mut reader: impl Read, max_output_bytes: usize) -> io::Result<CapturedOutput> {
     let mut captured = Vec::with_capacity(max_output_bytes.min(16 * 1024));
     let mut truncated = false;
@@ -826,6 +1084,7 @@ mod tests {
             Err(error) => panic!("failed to create fake runtime: {error}"),
         };
         assert!(file.write_all(script_body.as_bytes()).is_ok());
+        assert!(file.sync_all().is_ok());
         let mut permissions = match file.metadata() {
             Ok(metadata) => metadata.permissions(),
             Err(error) => panic!("failed to inspect fake runtime: {error}"),
@@ -957,6 +1216,216 @@ esac
         assert!(delete.is_ok());
 
         assert!(fs::remove_dir_all(directory).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_diagnostic_capture_respects_output_limit() {
+        use std::os::unix::net::UnixDatagram;
+
+        let (reader, writer) = UnixDatagram::pair().expect("create diagnostic socket");
+        reader
+            .set_nonblocking(true)
+            .expect("nonblocking diagnostic reader");
+        assert_eq!(
+            writer.send(&[b'x'; 96]).expect("send bounded diagnostic"),
+            96
+        );
+        let mut output = CapturedOutput {
+            bytes: Vec::new(),
+            truncated: false,
+        };
+        drain_nonblocking_datagrams(&reader, &mut output, 17)
+            .expect("capture diagnostic with a strict byte limit");
+        assert_eq!(output.bytes, vec![b'x'; 17]);
+        assert!(output.truncated);
+
+        writer.send(b"more").expect("send additional diagnostic");
+        drain_nonblocking_datagrams(&reader, &mut output, 17)
+            .expect("discard additional data beyond capture limit");
+        assert_eq!(output.bytes.len(), 17);
+        assert!(output.truncated);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oversized_create_diagnostic_packet_marks_capture_truncated() {
+        use std::os::unix::net::UnixDatagram;
+
+        let (reader, writer) = UnixDatagram::pair().expect("create diagnostic socket");
+        reader
+            .set_nonblocking(true)
+            .expect("nonblocking diagnostic reader");
+        let packet = vec![b'x'; 12_000];
+        assert_eq!(
+            writer.send(&packet).expect("send oversized packet"),
+            packet.len()
+        );
+
+        let mut output = CapturedOutput {
+            bytes: Vec::new(),
+            truncated: false,
+        };
+        drain_nonblocking_datagrams(&reader, &mut output, 1024 * 1024)
+            .expect("read an oversized create diagnostic");
+        assert_eq!(output.bytes.len(), 8192);
+        assert!(output.truncated, "lost datagram tail must be reported");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_preserves_bounded_failure_diagnostics() {
+        let (directory, script) = fake_runtime(
+            "create-failure-diagnostics",
+            "#!/bin/sh\nprintf 'create-denied' >&2\nexit 27\n",
+        );
+        let command = RuntimeCommand {
+            program: script,
+            args: vec![OsString::from("create")],
+        };
+        match RuntimeExecutor::default().execute(&command) {
+            Err(RuntimeExecutionError::NonZeroExit {
+                code: Some(27),
+                stderr,
+                ..
+            }) => assert!(stderr.text_lossy().contains("create-denied")),
+            other => panic!("expected create failure diagnostics: {other:?}"),
+        }
+        fs::remove_dir_all(directory).expect("clean test directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_descendant_diagnostic_write_does_not_receive_sigpipe() {
+        let directory = temporary_directory("create-no-sigpipe");
+        assert!(fs::create_dir_all(&directory).is_ok());
+        let marker = directory.join("descendant-survived");
+        let script = directory.join("fake-runtime");
+        let body = format!(
+            "#!/bin/sh\n(sleep 0.2; printf 'late-diagnostic' >&2; printf survived > '{}') &\nexit 0\n",
+            marker.display()
+        );
+        fs::write(&script, body).expect("write disposable fixture");
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
+            .expect("make fixture executable");
+        let command = RuntimeCommand {
+            program: script,
+            args: vec![OsString::from("create")],
+        };
+        RuntimeExecutor::default()
+            .execute(&command)
+            .expect("create should not wait for a descendant");
+        thread::sleep(Duration::from_millis(450));
+        assert_eq!(
+            fs::read_to_string(marker).expect("child must survive stderr write"),
+            "survived"
+        );
+        fs::remove_dir_all(directory).expect("clean test directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_returns_while_descendant_retains_inherited_streams() {
+        let (directory, script) = fake_runtime(
+            "create-inherits-output",
+            "#!/bin/sh\nsleep 2 &\nprintf 'created\n'\n",
+        );
+        let command = RuntimeCommand {
+            program: script,
+            args: vec![OsString::from("create")],
+        };
+        let began = Instant::now();
+        let executor = RuntimeExecutor::new(RuntimeExecutionPolicy {
+            timeout: Duration::from_millis(500),
+            ..RuntimeExecutionPolicy::default()
+        });
+        let mut result = executor.execute(&command);
+        // Filesystems used by shared CI runners can transiently reject a newly
+        // created shell fixture with ETXTBSY. Only retry that spawn error:
+        // runtime deadlines and other execution failures must remain visible.
+        for _ in 0..4 {
+            if matches!(
+                &result,
+                Err(RuntimeExecutionError::Spawn { source, .. })
+                    if source.kind() == io::ErrorKind::ExecutableFileBusy
+            ) {
+                thread::sleep(Duration::from_millis(15));
+                result = executor.execute(&command);
+            } else {
+                break;
+            }
+        }
+        assert!(
+            result.is_ok(),
+            "create should not wait for child EOF: {result:?}"
+        );
+        assert!(began.elapsed() < Duration::from_millis(900));
+        fs::remove_dir_all(directory).expect("clean test directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn noncreate_capture_does_not_wait_for_descendant_eof() {
+        let (directory, script) = fake_runtime(
+            "state-inherits-output",
+            "#!/bin/sh\nsleep 2 &\nprintf '{\"status\":\"running\"}\n'\n",
+        );
+        let command = RuntimeCommand {
+            program: script,
+            args: vec![OsString::from("state")],
+        };
+        let began = Instant::now();
+        let result = RuntimeExecutor::new(RuntimeExecutionPolicy {
+            timeout: Duration::from_millis(500),
+            ..RuntimeExecutionPolicy::default()
+        })
+        .execute(&command)
+        .expect("state must return without descendant EOF");
+        assert!(result.stdout.text_lossy().contains("running"));
+        assert!(began.elapsed() < Duration::from_millis(900));
+        fs::remove_dir_all(directory).expect("clean test directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn huge_poll_interval_respects_timeout() {
+        let command = RuntimeCommand {
+            program: PathBuf::from("/bin/sh"),
+            args: vec![OsString::from("-c"), OsString::from("exec sleep 5")],
+        };
+        let began = Instant::now();
+        let result = RuntimeExecutor::new(RuntimeExecutionPolicy {
+            timeout: Duration::from_millis(75),
+            poll_interval: Duration::from_secs(5),
+            ..RuntimeExecutionPolicy::default()
+        })
+        .execute(&command);
+        assert!(matches!(
+            result,
+            Err(RuntimeExecutionError::TimedOut { .. })
+        ));
+        assert!(began.elapsed() < Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nonzero_exit_preserves_stderr() {
+        let command = RuntimeCommand {
+            program: PathBuf::from("/bin/sh"),
+            args: vec![
+                OsString::from("-c"),
+                OsString::from("printf 'bad-state' >&2; exit 19"),
+            ],
+        };
+        match RuntimeExecutor::default().execute(&command) {
+            Err(RuntimeExecutionError::NonZeroExit {
+                code: Some(19),
+                stderr,
+                ..
+            }) => assert!(stderr.text_lossy().contains("bad-state")),
+            other => panic!("expected nonzero exit and stderr: {other:?}"),
+        }
     }
 
     #[cfg(unix)]
