@@ -237,3 +237,28 @@ func TestPendingOCICommandRequiresNoExternalRuntime(t *testing.T) {
 		t.Fatal("mutation flag accepted on read-only journal command")
 	}
 }
+
+func TestStackImpactCLIIsReadOnly(t *testing.T) {
+	document := strings.Replace(`{"apiVersion":"goreecloud.containers/v1alpha1","kind":"Stack","metadata":{"name":"x"},"services":[{"name":"web","image":"sha256:__HASH__","replicas":1,"resources":{"cpuMilli":250,"memoryBytes":33554432},"security":{"runAsNonRoot":true,"readOnlyRootFilesystem":true,"network":"isolated"}}]}`, "__HASH__", strings.Repeat("f", 64), 1)
+	parent := t.TempDir()
+	old := filepath.Join(parent, "old.json")
+	current := filepath.Join(parent, "new.json")
+	if err := os.WriteFile(old, []byte(document), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(current, []byte(strings.Replace(document, `"replicas":1`, `"replicas":2`, 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := run([]string{"stack", "impact", old, current}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"deploymentAuthorized": false`) ||
+		!strings.Contains(output.String(), `"manualReviewRequired": true`) ||
+		!strings.Contains(output.String(), `"rollbackVerified": false`) {
+		t.Fatalf("risk assessment incorrectly authorized deployment: %s", output.String())
+	}
+	if err := run([]string{"stack", "impact", old}, &output); err == nil {
+		t.Fatal("missing target accepted")
+	}
+}

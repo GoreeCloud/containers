@@ -117,3 +117,7 @@ The experimental real-runner adapter now creates a private, synchronized, exclus
 Read-only image-store audits now also inventory bounded user-private temporary ingestion entries, reporting only counts and total staging bytes, never names or paths. A staging file may be actively written by another process or left after an interrupted import; either requires operator review. The audit rejects symlinks, unusual names, unsafe ownership, hardlinks and exceeded inspection limits but **does not delete, repair or garbage-collect content**. Reported storage totals are observational, not disk quotas or evidence of clean crash recovery.
 
 When any active or interrupted import staging entry exists, the aggregate audit deliberately reports verified=false and operatorReviewRequired=true. No unattended cleanup or false healthy status is permitted.
+
+## Dependency-aware native stack risk impact
+
+The read-only stack impact command compares two validated native specifications and tracks transitive dependents of changed services across both original and target dependency graphs. It computes a conservative **old-plus-new** potential overlapping CPU/memory envelope for change scenarios. This is a theoretical upper bound, not observed host capacity, actual coexistence scheduling, or a transactional rollback plan. Every changed scenario remains deploymentAuthorized=false, rollbackVerified=false and manualReviewRequired=true. It never deploys, stops or restarts a service.

@@ -44,6 +44,8 @@ go build -o gcontainers ./cmd/gcontainers
 ./gcontainers stack capacity examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16
 # Read-only changes between two native declarations:
 ./gcontainers stack diff examples/native-stack.json examples/native-stack.json
+# Conservative dependency blast-radius and overlapping resource estimate:
+./gcontainers stack impact examples/native-stack.json examples/native-stack.json
 ./gcontainers validate /path/to/oci-bundle
 ```
 
