@@ -35,6 +35,8 @@ go build -o gcontainers ./cmd/gcontainers
 ./gcontainers image import --store /home/you/private-image-store --file /path/to/blob --experimental
 ./gcontainers stack validate examples/native-stack.json
 ./gcontainers stack plan examples/native-stack.json
+# Offline, caller-supplied host budget; this is NOT a deployment authorization:
+./gcontainers stack capacity examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16
 # Read-only changes between two native declarations:
 ./gcontainers stack diff examples/native-stack.json examples/native-stack.json
 ./gcontainers validate /path/to/oci-bundle

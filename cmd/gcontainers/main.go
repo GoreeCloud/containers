@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,6 +60,9 @@ func run(args []string, out io.Writer) error {
 		return imageCommand(args[1:], out)
 
 	case "stack":
+		if len(args) >= 3 && args[1] == "capacity" {
+			return stackCapacity(args[2:], out)
+		}
 		if len(args) == 4 && args[1] == "diff" {
 			before, err := stack.Load(args[2])
 			if err != nil {
@@ -115,6 +119,7 @@ Usage:
 gcontainers stack validate NATIVE_STACK_JSON
   gcontainers stack plan NATIVE_STACK_JSON
   gcontainers stack diff OLD_STACK_JSON NEW_STACK_JSON
+  gcontainers stack capacity NATIVE_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
   gcontainers validate BUNDLE_DIRECTORY
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
   gcontainers oci start|stop|delete --id NAME --experimental
@@ -344,4 +349,43 @@ func imageCommand(args []string, out io.Writer) error {
 	}
 	_, err = fmt.Fprintln(out, string(output))
 	return err
+}
+
+// stackCapacity is a resource-only estimate from caller-supplied budget;
+// it never measures live host resources or launches a workload.
+func stackCapacity(args []string, out io.Writer) error {
+	if len(args) < 2 {
+		return errors.New("usage: stack capacity STACK_JSON --cpu-milli N --memory-mib N --max-instances N")
+	}
+	flags := flag.NewFlagSet("stack capacity", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	cpu := flags.Int64("cpu-milli", 0, "maximum declared millicores")
+	memoryMiB := flags.Int64("memory-mib", 0, "maximum declared MiB")
+	instances := flags.Int("max-instances", 0, "maximum declared instances")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || *memoryMiB <= 0 || *memoryMiB > math.MaxInt64/(1<<20) {
+		return errors.New("invalid capacity flags or memory quota")
+	}
+	parsed, err := stack.Load(args[0])
+	if err != nil {
+		return err
+	}
+	review, err := stack.AssessResources(parsed, stack.ResourceBudget{
+		CPUMilli: *cpu, MemoryBytes: *memoryMiB * (1 << 20), MaxInstances: *instances})
+	if err != nil {
+		return err
+	}
+	encoded, err := json.MarshalIndent(review, "", "  ")
+	if err != nil {
+		return err
+	}
+	if _, err = fmt.Fprintln(out, string(encoded)); err != nil {
+		return err
+	}
+	if !review.WithinLimits {
+		return errors.New("native stack capacity budget exceeded; review blockers")
+	}
+	return nil
 }

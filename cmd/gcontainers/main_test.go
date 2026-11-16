@@ -154,3 +154,29 @@ func TestNativeStackDiffCLIIsReadOnly(t *testing.T) {
 		t.Fatal("missing target accepted")
 	}
 }
+
+func TestNativeStackCapacityCLI(t *testing.T) {
+	document := strings.Replace(`{"apiVersion":"goreecloud.containers/v1alpha1","kind":"Stack","metadata":{"name":"a"},"services":[{"name":"web","image":"sha256:__HASH__","replicas":1,"resources":{"cpuMilli":250,"memoryBytes":33554432},"security":{"runAsNonRoot":true,"readOnlyRootFilesystem":true,"network":"isolated"}}]}`, "__HASH__", strings.Repeat("a", 64), 1)
+	file := filepath.Join(t.TempDir(), "stack.json")
+	if err := os.WriteFile(file, []byte(document), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{"stack", "capacity", file, "--cpu-milli", "500", "--memory-mib", "64", "--max-instances", "4"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"deploymentAuthorized": false`) || !strings.Contains(out.String(), `"withinLimits": true`) {
+		t.Fatal("capacity output should never authorize deployment")
+	}
+	out.Reset()
+	if err := run([]string{"stack", "capacity", file, "--cpu-milli", "100", "--memory-mib", "16", "--max-instances", "1"}, &out); err == nil {
+		t.Fatal("oversubscription must fail")
+	}
+	if !strings.Contains(out.String(), `"withinLimits": false`) {
+		t.Fatal("failed check must contain structured denial")
+	}
+	out.Reset()
+	if err := run([]string{"stack", "capacity", file}, &out); err == nil {
+		t.Fatal("missing explicit host budgets accepted")
+	}
+}
