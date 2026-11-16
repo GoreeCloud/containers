@@ -83,3 +83,7 @@ The read-only verifier now opens the OCI layout through a directory handle (os.R
 ## Explicit read-only host capacity budgeting
 
 The native stack capacity command accepts **caller-provided** CPU millicore, memory MiB, and max-instance envelopes; it computes declared aggregate demand, returns structured budget blockers and fails nonzero on oversubscription. It does not query live host resources, reserve cgroups, enforce limits, verify identities, resolve secrets, or authorize deployment; even an in-budget report declares deploymentAuthorized=false and requires manual review. Future real admission must inspect current host reservations, verified isolation and trusted MIPS policies before any atomic deployment.
+
+## OCI bundle descriptor anchoring
+
+Bundle policy parsing now opens an OCI bundle through an os.Root directory handle, rejects a symlinked bundle path, symlinked config entries and symlinks in the declared rootfs directory path. It cross-checks opened config file identity and reads bounded JSON from that same descriptor. **The external OCI runtime still independently reopens paths after validation**; this is a preview TOCTOU reduction, not immutable snapshotting or authorization for untrusted bundle execution. Test rootfs content, file mutation after checks, LSM confinement and failure recovery before runtime acceptance.

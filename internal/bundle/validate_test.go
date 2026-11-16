@@ -159,3 +159,40 @@ func TestProcessPreviewRestrictions(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBundleLoadRejectsSymlinkedRootAndAncestor(t *testing.T) {
+	original := setup(t, safeSpec)
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(original, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(link); err == nil {
+		t.Fatal("symlinked OCI bundle accepted")
+	}
+	rootfs := filepath.Join(original, "rootfs")
+	if err := os.Rename(rootfs, rootfs+"-real"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("rootfs-real", rootfs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(original); err == nil {
+		t.Fatal("symlinked rootfs accepted")
+	}
+}
+func TestBundleLoadRejectsSymlinkedIntermediateRootfs(t *testing.T) {
+	raw := strings.Replace(safeSpec, `"path":"rootfs"`, `"path":"base/rootfs"`, 1)
+	dir := setup(t, raw)
+	if err := os.Mkdir(filepath.Join(dir, "real"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "rootfs"), filepath.Join(dir, "real", "rootfs")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real", filepath.Join(dir, "base")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil {
+		t.Fatal("symlinked rootfs parent accepted")
+	}
+}

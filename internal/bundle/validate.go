@@ -82,53 +82,69 @@ func Validate(dir string) error { _, err := Load(dir); return err }
 
 // Validate reads no more than 1 MiB and never executes a bundle.
 func Load(dir string) (*Spec, error) {
-	bundleDir, err := filepath.EvalSymlinks(dir)
+	bundleDir, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, fmt.Errorf("bundle directory: %w", err)
 	}
-	fi, err := os.Stat(bundleDir)
-	if err != nil || !fi.IsDir() {
+	resolved, err := filepath.EvalSymlinks(bundleDir)
+	if err != nil || resolved != bundleDir {
+		return nil, errors.New("symlinked OCI bundle or parent is unsupported")
+	}
+	before, err := os.Lstat(bundleDir)
+	if err != nil || !before.IsDir() {
 		return nil, errors.New("bundle must be a directory")
 	}
-	path := filepath.Join(bundleDir, "config.json")
-	info, err := os.Lstat(path)
+	root, err := os.OpenRoot(bundleDir)
+	if err != nil {
+		return nil, fmt.Errorf("open OCI bundle root: %w", err)
+	}
+	defer root.Close()
+	opened, err := root.Lstat(".")
+	if err != nil || !os.SameFile(before, opened) {
+		return nil, errors.New("OCI bundle directory changed while opening")
+	}
+	info, err := root.Lstat("config.json")
 	if err != nil {
 		return nil, fmt.Errorf("OCI config: %w", err)
 	}
-	if !info.Mode().IsRegular() {
-		return nil, errors.New("OCI config must be a regular file (not a symlink)")
+	if !info.Mode().IsRegular() || info.Size() > MaxConfigBytes {
+		return nil, errors.New("OCI config must be a regular bounded file, not a symlink")
 	}
-	f, err := os.Open(path)
+	f, err := root.Open("config.json")
 	if err != nil {
 		return nil, fmt.Errorf("OCI config: %w", err)
 	}
 	defer f.Close()
+	opened, err = f.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return nil, errors.New("OCI config changed while opening")
+	}
 	b, err := io.ReadAll(io.LimitReader(f, MaxConfigBytes+1))
 	if err != nil {
 		return nil, errors.New("unable to read OCI config")
 	}
-	if len(b) > MaxConfigBytes {
-		return nil, errors.New("OCI config exceeds 1 MiB limit")
+	if len(b) > MaxConfigBytes || int64(len(b)) != info.Size() {
+		return nil, errors.New("OCI config was oversized or changed size while reading")
 	}
 	if err := rejectDuplicateKeys(b); err != nil {
 		return nil, fmt.Errorf("OCI JSON: %w", err)
 	}
 	var spec Spec
-	d := json.NewDecoder(bytes.NewReader(b))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&spec); err != nil {
-		return nil, fmt.Errorf("unsupported or invalid OCI config: %w", err)
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&spec); err != nil {
+		return nil, fmt.Errorf("unsupported OCI config: %w", err)
 	}
-	if err := d.Decode(new(any)); err != io.EOF {
+	if err := decoder.Decode(new(any)); err != io.EOF {
 		return nil, errors.New("OCI config has trailing data")
 	}
-	if err := validateSpec(&spec, bundleDir); err != nil {
+	if err := validateSpec(&spec, root); err != nil {
 		return nil, err
 	}
 	return &spec, nil
 }
 
-func validateSpec(s *Spec, dir string) error {
+func validateSpec(s *Spec, root *os.Root) error {
 	if s.OCIVersion == "" || s.Process == nil || s.Root == nil || s.Linux == nil {
 		return errors.New("OCI version, process, root and linux are required")
 	}
@@ -145,21 +161,24 @@ func validateSpec(s *Spec, dir string) error {
 	if c == nil || len(c.Bounding)+len(c.Effective)+len(c.Inheritable)+len(c.Permitted)+len(c.Ambient) != 0 {
 		return errors.New("all process capability sets must be explicitly empty")
 	}
-	if !s.Root.Readonly || !filepath.IsLocal(s.Root.Path) {
-		return errors.New("root.path must be local and root.readonly must be true")
+	if !s.Root.Readonly || !filepath.IsLocal(s.Root.Path) ||
+		filepath.Clean(s.Root.Path) != s.Root.Path || s.Root.Path == "." {
+		return errors.New("root.path must be a clean local directory and root.readonly must be true")
 	}
-	rootPath, err := filepath.EvalSymlinks(filepath.Join(dir, s.Root.Path))
-	if err != nil {
-		return errors.New("rootfs directory not available")
+	// Reject all symlink ancestors: even links that resolve inside the
+	// bundle would create a mutable path-to-rootfs interpretation.
+	parent := ""
+	for _, segment := range strings.Split(s.Root.Path, string(filepath.Separator)) {
+		if segment == "" || segment == "." || segment == ".." {
+			return errors.New("unsafe OCI rootfs path component")
+		}
+		parent = filepath.Join(parent, segment)
+		fi, err := root.Lstat(parent)
+		if err != nil || !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
+			return errors.New("OCI rootfs or ancestor is missing, non-directory or symlinked")
+		}
 	}
-	rel, err := filepath.Rel(dir, rootPath)
-	if err != nil || rel == "." || !filepath.IsLocal(rel) {
-		return errors.New("rootfs must resolve inside the OCI bundle")
-	}
-	rootInfo, err := os.Stat(rootPath)
-	if err != nil || !rootInfo.IsDir() {
-		return errors.New("rootfs must be a directory")
-	}
+
 	required := map[string]bool{"user": false, "pid": false, "mount": false, "network": false, "ipc": false, "uts": false}
 	seen := map[string]bool{}
 	for _, ns := range s.Linux.Namespaces {
