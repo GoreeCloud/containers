@@ -69,3 +69,7 @@ The private journal census now compares two consecutive bounded, deterministic i
 ### Fail-closed OCI state reads
 
 The real adapter now acquires the per-container cooperative lock and checks the private pending journal BEFORE reading state from the external OCI runtime. An unresolved mutation causes a nonzero result instead of a misleading healthy status. Synthetic injected-runner tests verify that a pending intent blocks status reads and that a concurrent mutation lock delays status. This cannot attest to the state of processes manipulated directly by unrelated runtimes.
+
+### Post-acquisition OCI lock identity check
+
+The private per-container cooperative lock now checks its pathname inode, owner and private permissions **after** acquiring the filesystem flock, not only before waiting. This catches a replaced lock pathname during a competing operation's wait. Direct OCI runtime invocations, hostile same-user lock replacement after the check and real kernel process supervision remain unverified and cannot be treated as solved.

@@ -92,6 +92,11 @@ func WithContainerLock(ctx context.Context, stateRoot, id string, action func() 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// An inode checked before flock can be unlinked or replaced while
+	// this process waits for another cooperating writer to release it.
+	if err := verifyAcquiredContainerLock(root, lockPath, opened); err != nil {
+		return err
+	}
 	return action()
 }
 
@@ -104,6 +109,22 @@ func privateStateInfo(info os.FileInfo) error {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || stat.Uid != uint32(os.Geteuid()) {
 		return errors.New("OCI lock parent not caller-owned")
+	}
+	return nil
+}
+
+// verifyAcquiredContainerLock detects lock-path replacement after flock.
+// This is advisory cooperation, not defense against a malicious same-user
+// actor changing a file later or bypassing our lock.
+func verifyAcquiredContainerLock(root *os.Root, name string, opened os.FileInfo) error {
+	current, err := root.Lstat(name)
+	if err != nil || !os.SameFile(current, opened) || !current.Mode().IsRegular() ||
+		current.Mode().Perm()&0077 != 0 {
+		return errors.New("OCI cooperative lock changed during acquisition")
+	}
+	st, ok := current.Sys().(*syscall.Stat_t)
+	if !ok || st.Uid != uint32(os.Geteuid()) || st.Nlink != 1 {
+		return errors.New("OCI cooperative lock owner or hardlink changed during acquisition")
 	}
 	return nil
 }
