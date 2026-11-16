@@ -11,6 +11,7 @@ GoreeCloud Containers is being built as the eventual default containerization so
 - `gcontainers doctor`: a read-only report of local Linux and OCI runtime prerequisites.
 - `gcontainers validate <bundle-directory>`: fail-closed parsing of a restricted rootless OCI bundle policy. Includes file-size and JSON nesting limits, duplicate-key rejection, and restrictions on host namespaces, root filesystem, capabilities, devices, hooks, writable/bind mounts, and seccomp defaults.
 - `gcontainers oci create|start|state|stop|delete`: a GoreeCloud-owned lifecycle adapter that invokes an external, replaceable OCI low-level runtime (`crun` or `runc`) directly, without Docker, Podman, containerd, a shell, or a background daemon. Mutations require `--experimental`; runtime state is stored in a private per-user directory and deletion is never forced.
+- Native GoreeCloud stack JSON preview: strict, versioned schema validation and dependency-ordered **dry-run plans only**. No Docker Compose engine is required; no stack apply or service deployment exists yet.
 - Standard-library-only Go code, initial unit tests and Linux CI.
 
 The execution adapter is **not** yet independently security audited or exercised against real kernel isolation in this change. OCI runtimes remain required for execution; this is not a from-scratch kernel runtime. Validation reduces obvious hazards, but cannot certify an arbitrary OCI bundle as safe.
@@ -23,6 +24,8 @@ Requires Linux and Go 1.27 or later.
 go test ./...
 go build -o gcontainers ./cmd/gcontainers
 ./gcontainers doctor
+./gcontainers stack validate examples/native-stack.json
+./gcontainers stack plan examples/native-stack.json
 ./gcontainers validate /path/to/oci-bundle
 ```
 

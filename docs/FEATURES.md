@@ -7,7 +7,8 @@
 | OCI lifecycle adapter via crun/runc | Development | internal/engine; real kernel runtime acceptance open |
 | Rootless image store and OCI registry support | Planned | M2: no production image pull/build |
 | Rootless network, volumes and cgroups | Planned | M3 |
-| Native GoreeCloud stack format and runner | Planned | M4; not merely a Docker Compose wrapper |
+| Native GoreeCloud stack JSON validator and dry-run dependency planner | Development | M4 preview; checks immutable image digests and restrictions; no workloads launched |
+| Native stack executor and deployment reconciliation | Planned | M4; not merely a Docker Compose wrapper |
 | Optional Docker Compose import/compatibility | Planned | M4, second priority to native stack |
 | Optional Podman compatibility | Planned | M4, second priority |
 | Daemon/API and service supervision | Planned | M5 |

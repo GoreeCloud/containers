@@ -25,3 +25,7 @@
 ## Acceptance before deployment
 
 Dedicated rootless test host; kernel namespace/cgroup/LSM/seccomp experiments; malicious-bundle tests including symlink races, mount/device escape, UID mapping collisions and hostile rootfs; API threat model; dependency SBOM and vulnerability review; registry extraction/verification; credential scoping; backup and restore; resource exhaustion; failure injection and rollback. Independently review against GoreeShield and Wardveil requirements.
+
+## Native stack declaration preview
+
+The JSON-only stack schema is the **first-priority GoreeCloud definition format**. Its parser limits size/nesting, rejects duplicate keys, unknown fields, arbitrary host ports/mounts, mutable image references, root privileges, non-isolated networking, cycles and unbounded resource requests. Its plan is a **read-only proposal**, not a deployment action or policy enforcement at runtime. Secret references remain unresolved identifiers and must later integrate with GoreeCloud Identity, GoreeShield and Wardveil policy. No remote admission, storage, image fetch, runtime execution or Compose parsing is implemented here.
