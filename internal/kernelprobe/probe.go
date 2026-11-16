@@ -3,13 +3,13 @@
 package kernelprobe
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -45,13 +45,34 @@ func ReadSnapshot() (map[string]string, int, error) {
 	}
 	return ids, os.Geteuid(), nil
 }
-func WriteChildSnapshot() ([]byte, error) {
-	ids, uid, err := ReadSnapshot()
+
+// The isolated child receives parent namespace IDs over a bounded stdin pipe
+// and returns only booleans. Inode identities are never emitted on stdout.
+type childComparison struct {
+	NamespacesDistinct bool `json:"namespacesDistinct"`
+	UserMappedAsRoot   bool `json:"userMappedAsRoot"`
+}
+
+func WriteChildComparison(input io.Reader) ([]byte, error) {
+	if input == nil {
+		return nil, errors.New("parent snapshot required")
+	}
+	encoded, err := io.ReadAll(io.LimitReader(input, 2049))
+	if err != nil || len(encoded) == 0 || len(encoded) > 2048 {
+		return nil, errors.New("parent namespace snapshot invalid or too large")
+	}
+	var parent snapshot
+	if err := json.Unmarshal(encoded, &parent); err != nil || parent.UID == 0 || len(parent.IDs) != len(names) {
+		return nil, errors.New("invalid rootless parent namespace snapshot")
+	}
+	current, uid, err := ReadSnapshot()
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(snapshot{IDs: ids, UID: uid})
+	valid := Compare(parent.IDs, current, uid)
+	return json.Marshal(childComparison{NamespacesDistinct: valid, UserMappedAsRoot: valid})
 }
+
 func Compare(parent, child map[string]string, childUID int) bool {
 	if childUID != 0 || len(parent) != len(names) || len(child) != len(names) {
 		return false
@@ -75,7 +96,7 @@ func Probe(ctx context.Context, executable string) (Report, error) {
 	if err := ctx.Err(); err != nil {
 		return report, err
 	}
-	if os.Geteuid() == 0 || !filepath.IsAbs(executable) {
+	if os.Geteuid() == 0 || executable != "/proc/self/exe" {
 		return report, errors.New("nonroot caller and absolute executable required")
 	}
 	original, _, err := ReadSnapshot()
@@ -85,7 +106,12 @@ func Probe(ctx context.Context, executable string) (Report, error) {
 	timed, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	report.Attempted = true
+	parentPayload, err := json.Marshal(snapshot{IDs: original, UID: os.Geteuid()})
+	if err != nil || len(parentPayload) > 2048 {
+		return report, errors.New("invalid parent namespace data")
+	}
 	cmd := exec.CommandContext(timed, executable, "__kernel-probe-child")
+	cmd.Stdin = bytes.NewReader(parentPayload)
 	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWNS | syscall.CLONE_NEWPID |
@@ -106,12 +132,12 @@ func Probe(ctx context.Context, executable string) (Report, error) {
 		report.Findings = append(report.Findings, "invalid bounded child response")
 		return report, nil
 	}
-	var child snapshot
+	var child childComparison
 	if err := json.Unmarshal(output.data, &child); err != nil {
 		report.Findings = append(report.Findings, "invalid isolated child response")
 		return report, nil
 	}
-	report.RootlessNamespacesDistinct = Compare(original, child.IDs, child.UID)
+	report.RootlessNamespacesDistinct = child.NamespacesDistinct && child.UserMappedAsRoot
 	report.UserMappedAsNamespaceRoot = report.RootlessNamespacesDistinct
 	if !report.RootlessNamespacesDistinct {
 		report.Findings = append(report.Findings, "not all requested namespaces were distinct")

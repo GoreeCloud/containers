@@ -1,7 +1,9 @@
 package kernelprobe
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -37,5 +39,38 @@ func TestCanceledKernelProbeDoesNotAuthorizeDeployment(t *testing.T) {
 	if !report.ReadOnly || report.DeploymentAuthorized || report.OCIIsolationVerified ||
 		report.SeccompVerified || report.LSMVerified || report.CgroupDelegationVerified {
 		t.Fatal("unsupported security certification")
+	}
+}
+
+func TestProbeChildUsesBoundedInputAndNeverLeaksNamespaceIdentifiers(t *testing.T) {
+	if _, err := WriteChildComparison(bytes.NewReader(nil)); err == nil {
+		t.Fatal("child accepted direct invocation without a parent")
+	}
+	if _, err := WriteChildComparison(bytes.NewReader(bytes.Repeat([]byte("x"), 2200))); err == nil {
+		t.Fatal("child accepted oversized parent data")
+	}
+	parent, _, err := ReadSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := json.Marshal(snapshot{IDs: parent, UID: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := WriteChildComparison(bytes.NewReader(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(result, []byte("user:[")) ||
+		bytes.Contains(result, []byte("net:[")) ||
+		bytes.Contains(result, []byte(`"ids"`)) {
+		t.Fatalf("child output included raw namespace identifiers: %s", result)
+	}
+	var comparison childComparison
+	if err := json.Unmarshal(result, &comparison); err != nil {
+		t.Fatal(err)
+	}
+	if comparison.NamespacesDistinct || comparison.UserMappedAsRoot {
+		t.Fatal("self namespace was incorrectly claimed distinct")
 	}
 }

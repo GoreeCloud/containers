@@ -16,10 +16,9 @@ func runKernelProbe(out io.Writer) error {
 	if runtime.GOOS != "linux" || os.Geteuid() == 0 {
 		return errors.New("rootless Linux caller required")
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
+	// proc/self/exe pins the already-running program inode, rather than
+	// resolving a potentially replaced user-writable executable pathname.
+	executable := "/proc/self/exe"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	report, err := kernelprobe.Probe(ctx, executable)
@@ -37,7 +36,7 @@ func runKernelProbeChild(out io.Writer) error {
 	if runtime.GOOS != "linux" {
 		return errors.New("Linux namespace probe only")
 	}
-	b, err := kernelprobe.WriteChildSnapshot()
+	b, err := kernelprobe.WriteChildComparison(os.Stdin)
 	if err != nil {
 		return err
 	}
