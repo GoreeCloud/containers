@@ -43,3 +43,7 @@ References checked 2026-11-16: https://github.com/containers/crun/security/advis
 ## OCI subprocess cancellation
 
 The low-level runtime adapter now places its child invocation in an isolated process group, sends SIGKILL to that group on context cancellation, and pins a trusted search PATH rather than inheriting the invoking shell PATH. Timeouts are tested with a synthetic system sleep subprocess. This is a bounded shutdown safeguard, not a full service supervisor or guarantee that processes that leave the group, escaped descendants, or already-registered OCI runtime containers are terminated. Persistent state reconciliation and independent termination acceptance remain required.
+
+## Fail-closed OCI lifecycle state handling
+
+Read-only OCI state responses now require a matching strict container ID, an accepted stable state, valid running PID, bounded output, and duplicate-key-safe JSON. Returned state is minimized to ID/status/PID; upstream annotations and bundle paths are never echoed. Start is allowed only from created, stop only from running, and non-force delete only from created/stopped. These checks reduce accidental transitions and privacy leakage; **they do not prevent state changes racing between read and execution, do not implement durable lock arbitration or reconciliation, and are not production state-management acceptance**.
