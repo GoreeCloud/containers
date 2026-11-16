@@ -143,6 +143,7 @@ gcontainers host inspect
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
   gcontainers oci start|stop|delete --id NAME --experimental
   gcontainers oci state --id NAME
+  gcontainers oci pending --id NAME    # read-only unresolved intent inspection
 Options for OCI commands: --runtime=crun|runc
 No image pull/unpack, native stack execution, networking, Compose or production deployment is implemented yet.`)
 	return err
@@ -189,7 +190,7 @@ func oci(args []string, w io.Writer) error {
 	}
 	action := args[0]
 	switch action {
-	case "create", "start", "state", "stop", "delete":
+	case "create", "start", "state", "stop", "delete", "pending":
 	default:
 		return errors.New("unsupported OCI action")
 	}
@@ -211,7 +212,7 @@ func oci(args []string, w io.Writer) error {
 	if err := engine.ValidateID(*id); err != nil {
 		return err
 	}
-	if action != "state" && !*experimental {
+	if action != "state" && action != "pending" && !*experimental {
 		return errors.New("OCI mutations require --experimental")
 	}
 	if action == "create" && *dir == "" {
@@ -219,6 +220,31 @@ func oci(args []string, w io.Writer) error {
 	}
 	if *backend != "crun" && *backend != "runc" {
 		return errors.New("only crun and runc are allowed")
+	}
+	if action == "pending" {
+		if *dir != "" || *experimental {
+			return errors.New("pending inspection is read-only and accepts only --id")
+		}
+		base := os.Getenv("XDG_RUNTIME_DIR")
+		if !filepath.IsAbs(base) || filepath.Clean(base) != base {
+			return errors.New("XDG_RUNTIME_DIR must be a clean absolute path")
+		}
+		resolved, err := filepath.EvalSymlinks(base)
+		if err != nil || resolved != base {
+			return errors.New("symlinked runtime directory unsupported")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		pending, err := engine.ReadPendingMutation(ctx, filepath.Join(base, "goreecloud-containers"), *id)
+		if err != nil {
+			return err
+		}
+		encoded, err := json.MarshalIndent(pending, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(w, string(encoded))
+		return err
 	}
 	path, err := exec.LookPath(*backend)
 	if err != nil {
