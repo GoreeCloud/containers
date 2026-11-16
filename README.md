@@ -32,6 +32,8 @@ go build -o gcontainers ./cmd/gcontainers
 ./gcontainers doctor
 # Read-only SHA256 verification of all committed blobs in a private store:
 ./gcontainers image audit --store /home/you/private-image-store
+# Cooperating imports enforce an aggregate 1-GiB committed-blob quota;
+# this is not a hard disk-space reservation or secure OCI extraction.
 ./gcontainers image verify /path/to/oci-layout
 ./gcontainers image inspect-layer /path/to/layer.tar tar
 # Optional experimental local blob import (opaque bytes only):

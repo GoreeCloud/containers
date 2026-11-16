@@ -125,3 +125,7 @@ The read-only stack impact command compares two validated native specifications 
 ## Privacy-minimized runtime incident census
 
 The read-only pending-summary CLI inventories a bounded private journal, rejects symlinks, unknown entries and malformed intent records, and reports only aggregate counts of incomplete create/start/stop/delete operations. It does **not expose container identifiers, process PIDs, bundle paths or secrets**. An unresolved intent produces a nonzero exit status and requires operator review. It does not query real OCI processes, detect journal entries removed externally, or repair runtime state. Summaries may change during concurrent activity and cannot be treated as stable snapshots.
+
+## Advisory aggregate committed-blob quota
+
+Cooperating OCI blob imports now take a private, no-follow, per-store exclusive filesystem lock before inspecting committed digest bytes and pending ingestion files. New unique commits are rejected when they would exceed a 1 GiB aggregate committed-byte preview quota; verified same-digest imports deduplicate without consuming more capacity. The lock is held through the temporary ingest and hardlink commit. This bounds committed content for cooperating import paths, but **does not reserve temporary-disk space**, cannot stop same-user direct filesystem writes or malicious bypasses, and cannot guarantee free host disk or safe eviction. Full store recovery, monitored filesystem capacity and actual quota enforcement remain Stable release gates.

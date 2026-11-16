@@ -47,7 +47,7 @@ func OpenExistingStore(path string) (*Store, error) {
 	if err != nil || resolved != parent {
 		return nil, errors.New("symlinked store parent not permitted")
 	}
-	store := &Store{root: path, maxBytes: maxBlobBytes}
+	store := &Store{root: path, maxBytes: maxBlobBytes, maxTotalBytes: maxAuditTotalBytes}
 	if err := store.verifyDirectories(); err != nil {
 		return nil, err
 	}
