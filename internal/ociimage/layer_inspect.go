@@ -1,0 +1,185 @@
+package ociimage
+
+import (
+	"archive/tar"
+	"compress/gzip"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"path"
+	"strings"
+)
+
+const (
+	MaxLayerCompressedBytes int64 = 128 << 20
+	MaxLayerUnpackedBytes   int64 = 256 << 20
+	MaxLayerEntries               = 4096
+	MaxLayerTrailingZeros   int64 = 64 << 10
+)
+
+type LayerReport struct {
+	FileCount      int   `json:"fileCount"`
+	DirectoryCount int   `json:"directoryCount"`
+	UnpackedBytes  int64 `json:"unpackedBytes"`
+}
+
+// InspectLayer parses an intentionally strict OCI tar/tar+gzip preview subset.
+// It NEVER writes to disk, extracts, applies whiteouts, or executes anything.
+// This is NOT a full OCI layer implementation or safe-image certification.
+func InspectLayer(ctx context.Context, input io.Reader, mediaType string) (LayerReport, error) {
+	var empty LayerReport
+	if ctx == nil || input == nil {
+		return empty, errors.New("layer inspection requires context and input")
+	}
+	if err := ctx.Err(); err != nil {
+		return empty, err
+	}
+	if mediaType != MediaLayer && mediaType != MediaLayerGzip {
+		return empty, errors.New("unsupported OCI layer compression or media type")
+	}
+	source := &layerContextReader{ctx: ctx, reader: io.LimitReader(input, MaxLayerCompressedBytes+1)}
+	var decoded io.Reader = source
+	if mediaType == MediaLayerGzip {
+		decoder, err := gzip.NewReader(source)
+		if err != nil {
+			return empty, errors.New("invalid gzip layer header")
+		}
+		defer decoder.Close()
+		decoded = decoder
+	}
+	reader := tar.NewReader(&layerContextReader{ctx: ctx, reader: decoded})
+	seen := map[string]byte{}
+	implied := map[string]bool{}
+	var report LayerReport
+	for {
+		if err := ctx.Err(); err != nil {
+			return empty, err
+		}
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return empty, fmt.Errorf("malformed OCI layer tar: %w", err)
+		}
+		if report.FileCount+report.DirectoryCount >= MaxLayerEntries {
+			return empty, errors.New("OCI layer entry limit exceeded")
+		}
+		if header == nil || header.Size < 0 || header.Size > MaxLayerUnpackedBytes {
+			return empty, errors.New("invalid OCI layer entry size")
+		}
+		if header.Linkname != "" || header.Mode&^int64(0o777) != 0 ||
+			header.Uid < 0 || header.Gid < 0 || len(header.PAXRecords) > 0 || len(header.Xattrs) > 0 {
+			return empty, errors.New("unsupported OCI entry links, privilege metadata or extended headers")
+		}
+		name := header.Name
+		directory := header.Typeflag == tar.TypeDir
+		if directory {
+			name = strings.TrimSuffix(name, "/")
+		}
+		if name == "" || name == "." || len(name) > 255 || strings.Contains(name, "\\") ||
+			strings.HasPrefix(name, "/") || !validLayerName(name) {
+			return empty, errors.New("unsafe OCI layer entry path")
+		}
+		if strings.HasPrefix(path.Base(name), ".wh.") {
+			return empty, errors.New("OCI whiteout processing is not supported in preview")
+		}
+		if seen[name] != 0 {
+			return empty, errors.New("duplicate OCI layer entry path")
+		}
+		if directory {
+			if header.Size != 0 {
+				return empty, errors.New("OCI directory contains payload")
+			}
+			if header.Typeflag != tar.TypeDir {
+				return empty, errors.New("invalid directory entry")
+			}
+			seen[name] = 'd'
+			report.DirectoryCount++
+		} else {
+			if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+				return empty, errors.New("unsupported OCI layer entry type")
+			}
+			if implied[name] {
+				return empty, errors.New("regular file conflicts with nested paths")
+			}
+			seen[name] = 'f'
+			if header.Size > MaxLayerUnpackedBytes-report.UnpackedBytes {
+				return empty, errors.New("OCI layer exceeds total uncompressed size quota")
+			}
+			n, err := io.CopyN(io.Discard, reader, header.Size)
+			if err != nil || n != header.Size {
+				return empty, errors.New("truncated OCI layer member")
+			}
+			report.FileCount++
+			report.UnpackedBytes += n
+		}
+		for parent := path.Dir(name); parent != "." && parent != "/"; parent = path.Dir(parent) {
+			if seen[parent] == 'f' {
+				return empty, errors.New("regular file is an OCI path ancestor")
+			}
+			implied[parent] = true
+		}
+	}
+	// Drain tar padding, detect nonzero suffixes, and verify gzip trailers.
+	// GNU/PAX archives, whiteouts and multi-stream OCI extensions remain unsupported.
+	trailer := &layerContextReader{ctx: ctx, reader: decoded}
+	buffer := make([]byte, 16<<10)
+	var padded int64
+	for {
+		n, err := trailer.Read(buffer)
+		padded += int64(n)
+		if padded > MaxLayerTrailingZeros {
+			return empty, errors.New("OCI tar trailer exceeds preview limit")
+		}
+		for _, byteValue := range buffer[:n] {
+			if byteValue != 0 {
+				return empty, errors.New("unexpected nonzero OCI tar trailing data")
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return empty, fmt.Errorf("OCI trailer verification failed: %w", err)
+		}
+	}
+	return report, nil
+}
+func validLayerName(name string) bool {
+	if path.Clean(name) != name || strings.ContainsRune(name, 0) {
+		return false
+	}
+	for _, segment := range strings.Split(name, "/") {
+		if segment == "" || segment == "." || segment == ".." || strings.Contains(segment, ":") {
+			return false
+		}
+	}
+	return true
+}
+
+type layerContextReader struct {
+	ctx        context.Context
+	reader     io.Reader
+	emptyReads int
+}
+
+func (r *layerContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.reader.Read(p)
+	if n < 0 || n > len(p) {
+		return 0, errors.New("invalid OCI layer reader byte count")
+	}
+	if n == 0 && err == nil {
+		r.emptyReads++
+		if r.emptyReads > 100 {
+			return 0, io.ErrNoProgress
+		}
+	} else {
+		r.emptyReads = 0
+	}
+	return n, err
+}

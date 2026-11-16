@@ -37,3 +37,7 @@ The development branch adds a user-owned private local SHA-256 blob store. New b
 ## Confinement improvements
 
 Local store operations now use an os.Root directory handle to anchor temporary writes, atomic links, and blob reads. Directory ownership/private permissions are verified, and inode identity is compared between metadata and open descriptors. Go's os.Root prevents traversal outside the anchored directory but **does not block bind mounts, device files, malicious same-user alteration, or all races**, so storage remains experimental. Linux descriptor, mount and privilege threat testing remains required.
+
+## Read-only layer preflight
+
+The development layer inspector parses a restricted tar or gzip-compressed tar subset with explicit entry count, input size and total uncompressed size limits. It rejects traversal, absolute paths, hard/symbolic links, device nodes, special permissions, duplicated or conflicting paths, whiteouts and PAX metadata. This **does not unpack, apply OCI whiteouts, support zstd, verify registry provenance or certify images as safe**. Unsupported valid OCI features intentionally fail closed pending a secure extractor, audited semantics, and isolated host acceptance.

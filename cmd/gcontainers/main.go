@@ -64,6 +64,7 @@ func usage(w io.Writer) error {
 Usage:
   gcontainers doctor
   gcontainers image verify OCI_LAYOUT_DIR
+  gcontainers image inspect-layer TAR_FILE tar|tar+gzip
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
   gcontainers validate BUNDLE_DIRECTORY
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
@@ -181,6 +182,41 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) == 3 && args[0] == "inspect-layer" {
+		media := ""
+		switch args[2] {
+		case "tar":
+			media = ociimage.MediaLayer
+		case "tar+gzip":
+			media = ociimage.MediaLayerGzip
+		default:
+			return errors.New("supported layer inspection media: tar or tar+gzip")
+		}
+		fi, err := os.Lstat(args[1])
+		if err != nil {
+			return err
+		}
+		if !fi.Mode().IsRegular() || fi.Size() > ociimage.MaxLayerCompressedBytes {
+			return errors.New("layer inspection requires a regular file within the compressed input limit")
+		}
+		file, err := os.Open(args[1])
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		report, err := ociimage.InspectLayer(ctx, file, media)
+		if err != nil {
+			return err
+		}
+		b, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(out, string(b))
+		return err
+	}
 	if len(args) == 2 && args[0] == "verify" {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
