@@ -121,3 +121,7 @@ When any active or interrupted import staging entry exists, the aggregate audit 
 ## Dependency-aware native stack risk impact
 
 The read-only stack impact command compares two validated native specifications and tracks transitive dependents of changed services across both original and target dependency graphs. It computes a conservative **old-plus-new** potential overlapping CPU/memory envelope for change scenarios. This is a theoretical upper bound, not observed host capacity, actual coexistence scheduling, or a transactional rollback plan. Every changed scenario remains deploymentAuthorized=false, rollbackVerified=false and manualReviewRequired=true. It never deploys, stops or restarts a service.
+
+## Privacy-minimized runtime incident census
+
+The read-only pending-summary CLI inventories a bounded private journal, rejects symlinks, unknown entries and malformed intent records, and reports only aggregate counts of incomplete create/start/stop/delete operations. It does **not expose container identifiers, process PIDs, bundle paths or secrets**. An unresolved intent produces a nonzero exit status and requires operator review. It does not query real OCI processes, detect journal entries removed externally, or repair runtime state. Summaries may change during concurrent activity and cannot be treated as stable snapshots.
