@@ -24,6 +24,33 @@ type Runner interface {
 }
 type ProcessRunner struct{}
 
+// guardedRuntimeRunner revalidates the trusted installed low-level binary
+// immediately before EACH OCI operation, not only when Engine is created.
+// Its gate is injectable for synthetic tests; production uses
+// CheckInstalledRuntime. This cannot prevent a privileged root-level binary
+// replacement after validation or attest the package supply chain.
+type guardedRuntimeRunner struct {
+	expectedBinary string
+	delegate       Runner
+	verify         func(context.Context, string) error
+}
+
+func (r guardedRuntimeRunner) Run(ctx context.Context, binary string, args ...string) ([]byte, error) {
+	if ctx == nil {
+		return nil, errors.New("OCI runtime context required")
+	}
+	if binary != r.expectedBinary || r.delegate == nil || r.verify == nil {
+		return nil, errors.New("OCI runtime revalidation configuration invalid")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.verify(ctx, binary); err != nil {
+		return nil, fmt.Errorf("OCI runtime safety revalidation blocked operation: %w", err)
+	}
+	return r.delegate.Run(ctx, binary, args...)
+}
+
 const maxRuntimeOutput = 64 << 10
 
 type boundedOutput struct {
@@ -113,7 +140,10 @@ func New(binary, stateRoot string, runner Runner) (*Engine, error) {
 		if err := CheckInstalledRuntime(ctx, binary); err != nil {
 			return nil, err
 		}
-		runner = ProcessRunner{}
+		runner = guardedRuntimeRunner{
+			expectedBinary: binary, delegate: ProcessRunner{},
+			verify: CheckInstalledRuntime,
+		}
 	}
 	return &Engine{Binary: binary, StateRoot: stateRoot, Runner: runner, lockMutations: useLocks}, nil
 }
