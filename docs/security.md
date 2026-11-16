@@ -63,3 +63,7 @@ References checked 2026-11-16: https://github.com/containers/crun/security/advis
 ## OCI subprocess cancellation
 
 The low-level runtime adapter now places its child invocation in an isolated process group, sends SIGKILL to that group on context cancellation, and pins a trusted search PATH rather than inheriting the invoking shell PATH. Timeouts are tested with a synthetic system sleep subprocess. This is a bounded shutdown safeguard, not a full service supervisor or guarantee that processes that leave the group, escaped descendants, or already-registered OCI runtime containers are terminated. Persistent state reconciliation and independent termination acceptance remain required.
+
+## Read-only layer preflight
+
+The development layer inspector parses a restricted tar or gzip-compressed tar subset with explicit entry count, input size and total uncompressed size limits. It rejects traversal, absolute paths, hard/symbolic links, device nodes, special permissions, duplicated or conflicting paths, whiteouts and PAX metadata. This **does not unpack, apply OCI whiteouts, support zstd, verify registry provenance or certify images as safe**. Unsupported valid OCI features intentionally fail closed pending a secure extractor, audited semantics, and isolated host acceptance.

@@ -7,6 +7,7 @@
 | OCI lifecycle adapter via crun/runc | Development | internal/engine; real kernel runtime acceptance open |
 | Read-only OCI image layout integrity verifier | Development | M2 preview; hashes referenced blobs, rejects external references and malformed layouts; no unpack/import/pull |
 | Private local SHA-256 blob storage/import | Development | M2 preview; bounded, atomically linked opaque blobs, no extraction/pull or production store acceptance |
+| Read-only bounded tar/gzip layer safety preflight | Development | M2 preview; fail closed on links, traversal, device nodes and unsupported formats; no extraction |
 | Full OCI image store, layer unpack and registry support | Planned | M2: no production image pull/build |
 | Rootless network, volumes and cgroups | Planned | M3 |
 | Native GoreeCloud stack JSON validator, canonical digest and parallel-stage dry-run planner | Development | M4 preview; checks immutable image digests and restrictions; no workloads launched |

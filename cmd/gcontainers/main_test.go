@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
 	"os"
 	"path/filepath"
@@ -97,5 +98,33 @@ func TestNativeStackCommandsFailClosed(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"dryRun": true`) || !strings.Contains(out.String(), `"operation": "would-deploy"`) {
 		t.Fatal("unsafe or missing dry-run marker")
+	}
+}
+
+func TestLayerInspectionCLI(t *testing.T) {
+	var bytesOut bytes.Buffer
+	var tarBytes bytes.Buffer
+	writer := tar.NewWriter(&tarBytes)
+	if err := writer.WriteHeader(&tar.Header{Name: "readme.txt", Mode: 0644, Size: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write([]byte("ok")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	filename := filepath.Join(t.TempDir(), "test.tar")
+	if err := os.WriteFile(filename, tarBytes.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"image", "inspect-layer", filename, "tar"}, &bytesOut); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(bytesOut.String(), `"fileCount": 1`) || !strings.Contains(bytesOut.String(), `"unpackedBytes": 2`) {
+		t.Fatalf("invalid read-only output: %s", bytesOut.String())
+	}
+	if err := run([]string{"image", "inspect-layer", filename, "tar+zstd"}, &bytesOut); err == nil {
+		t.Fatal("unsupported compression accepted")
 	}
 }
