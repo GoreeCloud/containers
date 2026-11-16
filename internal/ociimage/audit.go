@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 )
 
@@ -27,6 +28,9 @@ type AuditReport struct {
 	TotalBytes               int64 `json:"totalBytes"`
 	ContentAuthenticated     bool  `json:"contentAuthenticated"`
 	SourceProvenanceVerified bool  `json:"sourceProvenanceVerified"`
+	PendingImportFiles       int   `json:"pendingImportFiles"`
+	PendingImportBytes       int64 `json:"pendingImportBytes"`
+	OperatorReviewRequired   bool  `json:"operatorReviewRequired"`
 }
 
 // OpenExistingStore never creates or repairs a directory; callers may safely
@@ -167,6 +171,69 @@ func (s *Store) Audit(ctx context.Context) (AuditReport, error) {
 		result.TotalBytes += length
 		result.BlobCount++
 	}
-	result.Verified = true
+	if err := s.inspectPendingImports(ctx, root, &result); err != nil {
+		return empty, err
+	}
+	// A pending import may still be active or may be an interrupted write.
+	// It is never safe to declare the entire store fully verified until an
+	// operator has resolved the staging state.
+	result.Verified = !result.OperatorReviewRequired
 	return result, nil
+}
+
+// inspectPendingImports reports leftover OR active staging files without
+// altering, deleting, opening for writes, or assuming they are orphaned.
+// A concurrent import may legitimately appear here. Its state requires
+// operator review; there is intentionally no automatic GC/rollback.
+func (s *Store) inspectPendingImports(ctx context.Context, root *os.Root, report *AuditReport) error {
+	before, err := root.Lstat("tmp")
+	if err != nil || privateStoreInfo(before) != nil {
+		return errors.New("untrusted image temporary directory")
+	}
+	dir, err := root.Open("tmp")
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	opened, err := dir.Stat()
+	if err != nil || !os.SameFile(before, opened) || !opened.IsDir() {
+		return errors.New("image temporary directory changed during audit")
+	}
+	names, err := dir.Readdirnames(maxAuditBlobs + 1)
+	if err != nil && err != io.EOF {
+		return err
+	}
+	if len(names) > maxAuditBlobs {
+		return errors.New("too many pending OCI import entries")
+	}
+	for _, name := range names {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(name, ".ingest-") || len(name) != 40 {
+			return errors.New("unknown file in image import staging directory")
+		}
+		if _, err := hex.DecodeString(name[8:]); err != nil {
+			return errors.New("invalid OCI import temporary filename")
+		}
+		relative := "tmp/" + name
+		info, err := root.Lstat(relative)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > s.maxBytes || info.Mode().Perm()&0077 != 0 {
+			return errors.New("invalid OCI import temporary file")
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
+			return errors.New("OCI import temporary file ownership or links invalid")
+		}
+		if info.Size() > maxAuditTotalBytes-report.PendingImportBytes {
+			return errors.New("OCI import temporary data exceeds inspection quota")
+		}
+		report.PendingImportFiles++
+		report.PendingImportBytes += info.Size()
+	}
+	report.OperatorReviewRequired = report.PendingImportFiles > 0
+	return nil
 }

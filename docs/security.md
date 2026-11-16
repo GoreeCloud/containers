@@ -111,3 +111,9 @@ The stack declaration loader now resolves an absolute local file parent, rejects
 ## Durable pending mutation records — fail-closed recovery preview
 
 The experimental real-runner adapter now creates a private, synchronized, exclusive per-ID pending journal marker before invoking any OCI create/start/stop/delete operation, while holding its cooperative per-container lock. The marker is cleared only after the runtime reports success and a directory sync succeeds. On a runtime error, interruption or crash, a pending marker remains and the next cooperating mutation is **blocked until a separate audited recovery process resolves it**. The read-only OCI pending command reads a redacted minimal incident status from an existing user-private directory without contacting the OCI runtime or deleting markers. No automatic cleanup, automatic retry, or unchecked manual reset was introduced. A cleared marker alone is **not proof that the container is healthy**; direct external runtimes and malicious same-user edits are not covered, and proper crash recovery remains an unmet Stable acceptance gate.
+
+## Detection of interrupted or active import staging
+
+Read-only image-store audits now also inventory bounded user-private temporary ingestion entries, reporting only counts and total staging bytes, never names or paths. A staging file may be actively written by another process or left after an interrupted import; either requires operator review. The audit rejects symlinks, unusual names, unsafe ownership, hardlinks and exceeded inspection limits but **does not delete, repair or garbage-collect content**. Reported storage totals are observational, not disk quotas or evidence of clean crash recovery.
+
+When any active or interrupted import staging entry exists, the aggregate audit deliberately reports verified=false and operatorReviewRequired=true. No unattended cleanup or false healthy status is permitted.

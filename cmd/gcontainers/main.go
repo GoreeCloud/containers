@@ -315,8 +315,13 @@ func imageCommand(args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintln(out, string(result))
-		return err
+		if _, err = fmt.Fprintln(out, string(result)); err != nil {
+			return err
+		}
+		if report.OperatorReviewRequired {
+			return errors.New("unresolved or active OCI import staging requires operator review")
+		}
+		return nil
 	}
 	if len(args) == 3 && args[0] == "inspect-layer" {
 		media := ""
