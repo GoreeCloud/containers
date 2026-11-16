@@ -110,7 +110,31 @@ func Load(source string) (Spec, error) {
 	if int64(len(b)) != info.Size() || int64(len(b)) > MaxBytes {
 		return Spec{}, errors.New("stack declaration grew, shrank or exceeded quota during read")
 	}
+	if err := verifyStackInputIdentity(root, f, info, name); err != nil {
+		return Spec{}, err
+	}
 	return Parse(b)
+}
+
+// verifyStackInputIdentity rechecks the source under its anchored directory
+// after read so a same-length replace/symlink swap cannot be silently
+// accepted as the document that was opened before parsing. An in-place
+// same-user edit after this check still requires authenticated live admission.
+func verifyStackInputIdentity(root *os.Root, file *os.File, initial os.FileInfo, name string) error {
+	if root == nil || file == nil || initial == nil {
+		return errors.New("stack source handle missing")
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	current, err := root.Lstat(name)
+	if err != nil || !os.SameFile(initial, opened) || !os.SameFile(opened, current) ||
+		!opened.Mode().IsRegular() || !current.Mode().IsRegular() ||
+		opened.Size() != initial.Size() || current.Size() != initial.Size() {
+		return errors.New("stack source pathname or size changed during read")
+	}
+	return nil
 }
 
 func Parse(b []byte) (Spec, error) {

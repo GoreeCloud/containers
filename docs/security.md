@@ -79,3 +79,7 @@ The combined native preflight masks image-digest identifiers in its embedded tra
 ### Operator grant is a required native transition gate
 
 Even a source-valid, in-budget change to replicas, dependencies or other nonsecret application fields now fails the offline native preflight until a future GoreeCloud Identity operator authorization exists. The source-only tool reports goreeCloudIdentityReviewRequired=true and mipsAuthorizationVerified=false; it never grants, fetches or assumes an Identity token. A no-op input may pass offline checks but still cannot authorize a deployment.
+
+### Post-read stack declaration identity guard
+
+Native stack source loading now rechecks the open file inode, anchored pathname, regular-file type and byte count immediately after reading and before parsing. Tests simulate same-size replacement, in-place resize and a symlink swap. This reduces source pathname races but does not certify persistent filesystem snapshots or live running-state freshness.
