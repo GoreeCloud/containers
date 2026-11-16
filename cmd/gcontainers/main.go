@@ -173,6 +173,7 @@ Usage:
   gcontainers image audit --store ABS_EXISTING_STORE_DIR
   gcontainers image verify OCI_LAYOUT_DIR
   gcontainers image inspect-layer TAR_FILE tar|tar+gzip
+  gcontainers image verify-layer ABS_TAR_FILE tar|tar+gzip sha256:EXPECTED_64_HEX
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
 gcontainers host inspect
   gcontainers stack validate NATIVE_STACK_JSON
@@ -375,6 +376,9 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "verify-layer" {
+		return imageVerifyLayer(args[1:], out)
+	}
 	if len(args) == 3 && args[0] == "audit" && args[1] == "--store" {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()

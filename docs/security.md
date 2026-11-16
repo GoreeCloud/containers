@@ -171,3 +171,7 @@ The source-only native preflight counts (but does not name or resolve) services 
 ### Inert first-party kernel namespace probe
 
 The new gcontainers kernel-probe command creates only an unprivileged copy of its own first-party executable with isolated user, mount, PID, IPC, UTS and network namespace flags and single-caller UID/GID mapping. It compares namespace identities and reports only booleans, not inode identifiers, PIDs, or secret values. No rootfs is mounted and no OCI binary, application, image, networking, or cgroup is configured. Passing namespace creation NEVER verifies OCI isolation, cgroup delegation, seccomp, LSM or runtime provenance and cannot authorize a deployment. A denied clone is reported as unverified rather than bypassed.
+
+### Digest-pinned offline OCI layer admission preview
+
+The new image verify-layer CLI requires a caller-provided exact SHA-256 digest, a clean absolute nonsymlink input path, and a bounded tar or tar+gzip archive. It hashes the exact compressed/source bytes in the same stream consumed by the strict archive inspector, then rechecks the pathname and file identity before returning a conservative structured report. A matching digest is NOT authenticated provenance or a signed manifest, and a structurally supported archive is NOT authorization to unpack, mount or run its contents. Whiteouts, links, devices, privilege metadata and other unsupported archive semantics remain denied.
