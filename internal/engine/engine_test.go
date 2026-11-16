@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeRunner struct {
@@ -113,5 +114,41 @@ func TestRejectUntrustedExecutable(t *testing.T) {
 	}
 	if err := TrustedRuntimeBinary("../crun"); err == nil {
 		t.Fatal("relative runtime path accepted")
+	}
+}
+
+func TestRuntimeChildEnvironmentDoesNotInheritPath(t *testing.T) {
+	t.Setenv("PATH", "/tmp/untrusted-search-path")
+	found := false
+	for _, entry := range filteredRuntimeEnv() {
+		if entry == "PATH=/usr/sbin:/usr/bin:/sbin:/bin" {
+			found = true
+		}
+		if strings.Contains(entry, "untrusted-search-path") {
+			t.Fatal("runtime inherited attacker-controlled PATH")
+		}
+	}
+	if !found {
+		t.Fatal("trusted PATH missing")
+	}
+}
+func TestProcessRunnerHonorsCancellation(t *testing.T) {
+	path := "/usr/bin/sleep"
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("no trusted system sleep binary")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if _, err := (ProcessRunner{}).Run(ctx, path, "10"); err == nil {
+		t.Fatal("timeout unexpectedly succeeded")
+	}
+	if time.Since(started) > 3*time.Second {
+		t.Fatal("OCI subprocess cancellation exceeded bound")
+	}
+}
+func TestProcessRunnerRejectsNilContext(t *testing.T) {
+	if _, err := (ProcessRunner{}).Run(nil, "/usr/bin/true"); err == nil {
+		t.Fatal("nil context accepted")
 	}
 }

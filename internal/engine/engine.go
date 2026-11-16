@@ -46,18 +46,35 @@ func (w *boundedOutput) Write(p []byte) (int, error) {
 	return original, nil
 }
 func filteredRuntimeEnv() []string {
-	names := []string{"HOME", "PATH", "LANG", "LC_ALL", "XDG_RUNTIME_DIR"}
-	env := make([]string, 0, len(names))
+	names := []string{"HOME", "LANG", "LC_ALL", "XDG_RUNTIME_DIR"}
+	env := []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
 	for _, name := range names {
-		if value, ok := os.LookupEnv(name); ok {
+		if value, ok := os.LookupEnv(name); ok && !strings.ContainsRune(value, 0) {
 			env = append(env, name+"="+value)
 		}
 	}
 	return env
 }
 func (ProcessRunner) Run(ctx context.Context, binary string, args ...string) ([]byte, error) {
+	if ctx == nil {
+		return nil, errors.New("process context required")
+	}
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Env = filteredRuntimeEnv()
+	// Separate process group allows timeout to terminate descendant helper
+	// processes that inherited the OCI runtime command's process group.
+	// This does not provide complete OS process supervision/reaping.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if err == syscall.ESRCH {
+			return os.ErrProcessDone
+		}
+		return err
+	}
 	cmd.WaitDelay = 2 * time.Second
 	output := &boundedOutput{}
 	cmd.Stdout = output
