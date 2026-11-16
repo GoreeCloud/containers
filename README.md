@@ -14,6 +14,7 @@ GoreeCloud Containers is being built as the eventual default containerization so
 - Additional preflight: the preview requires the exact invoking nonroot host UID/GID mappings and an approved root-owned system-installed low-level OCI runtime executable. No subordinate UID/GID ranges yet.
 - Private local SHA-256 content-addressed blob store with bounded, directory-handle-anchored, atomic, deduplicated imports (requires explicit experimental confirmation; **no image unpack, registry client or container execution**).
 - Read-only OCI image-layout integrity verification: referenced SHA-256 blobs, descriptor sizes, metadata limits, no downloads or extraction. Supported OCI media types are intentionally restricted; **this is not an image store or container image engine**.
+- Native GoreeCloud stack JSON preview: strict, versioned schema validation and dependency-ordered, parallel-stage **dry-run plans only**, with a deterministic SHA-256 specification fingerprint (an audit identifier, not an approval). No Docker Compose engine is required; no stack apply or service deployment exists yet.
 - Standard-library-only Go code, initial unit tests and Linux CI.
 
 The execution adapter is **not** yet independently security audited or exercised against real kernel isolation in this change. OCI runtimes remain required for execution; this is not a from-scratch kernel runtime. Validation reduces obvious hazards, but cannot certify an arbitrary OCI bundle as safe.
@@ -29,6 +30,8 @@ go build -o gcontainers ./cmd/gcontainers
 ./gcontainers image verify /path/to/oci-layout
 # Optional experimental local blob import (opaque bytes only):
 ./gcontainers image import --store /home/you/private-image-store --file /path/to/blob --experimental
+./gcontainers stack validate examples/native-stack.json
+./gcontainers stack plan examples/native-stack.json
 ./gcontainers validate /path/to/oci-bundle
 ```
 

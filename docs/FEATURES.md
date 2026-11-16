@@ -9,7 +9,8 @@
 | Private local SHA-256 blob storage/import | Development | M2 preview; bounded, atomically linked opaque blobs, no extraction/pull or production store acceptance |
 | Full OCI image store, layer unpack and registry support | Planned | M2: no production image pull/build |
 | Rootless network, volumes and cgroups | Planned | M3 |
-| Native GoreeCloud stack format and runner | Planned | M4; not merely a Docker Compose wrapper |
+| Native GoreeCloud stack JSON validator, canonical digest and parallel-stage dry-run planner | Development | M4 preview; checks immutable image digests and restrictions; no workloads launched |
+| Native stack executor and deployment reconciliation | Planned | M4; not merely a Docker Compose wrapper |
 | Optional Docker Compose import/compatibility | Planned | M4, second priority to native stack |
 | Optional Podman compatibility | Planned | M4, second priority |
 | Daemon/API and service supervision | Planned | M5 |

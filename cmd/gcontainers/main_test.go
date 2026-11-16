@@ -59,3 +59,43 @@ func TestImageImportIsExplicitAndRootless(t *testing.T) {
 		t.Fatal("source bytes leaked into CLI output")
 	}
 }
+
+func TestNativeStackCommandsFailClosed(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"stack", "plan", "missing"}, &out); err == nil {
+		t.Fatal("missing stack accepted")
+	}
+	if err := run([]string{"stack", "apply", "whatever"}, &out); err == nil {
+		t.Fatal("unimplemented apply accepted")
+	}
+	if err := run([]string{"stack", "plan"}, &out); err == nil {
+		t.Fatal("invalid invocation accepted")
+	}
+	document := `{
+      "apiVersion":"goreecloud.containers/v1alpha1",
+      "kind":"Stack",
+      "metadata":{"name":"synthetic"},
+      "services":[{
+         "name":"api",
+         "image":"sha256:__HASH__",
+         "replicas":1,
+         "resources":{"cpuMilli":250,"memoryBytes":33554432},
+         "security":{"runAsNonRoot":true,"readOnlyRootFilesystem":true,"network":"isolated"}
+      }]
+    }`
+	document = strings.Replace(document, "__HASH__", strings.Repeat("a", 64), 1)
+	file := filepath.Join(t.TempDir(), "test-stack.json")
+	if err := os.WriteFile(file, []byte(document), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"stack", "validate", file}, &out); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := run([]string{"stack", "plan", file}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"dryRun": true`) || !strings.Contains(out.String(), `"operation": "would-deploy"`) {
+		t.Fatal("unsafe or missing dry-run marker")
+	}
+}

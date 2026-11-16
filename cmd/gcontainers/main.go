@@ -17,6 +17,8 @@ import (
 	"github.com/GoreeCloud/containers/internal/bundle"
 	"github.com/GoreeCloud/containers/internal/engine"
 	"github.com/GoreeCloud/containers/internal/ociimage"
+
+	"github.com/GoreeCloud/containers/internal/stack"
 )
 
 const version = "0.1.0-dev"
@@ -55,6 +57,29 @@ func run(args []string, out io.Writer) error {
 		return oci(args[1:], out)
 	case "image":
 		return imageCommand(args[1:], out)
+
+	case "stack":
+		if len(args) != 3 || (args[1] != "validate" && args[1] != "plan") {
+			return errors.New("usage: gcontainers stack validate|plan NATIVE_STACK_JSON")
+		}
+		parsed, err := stack.Load(args[2])
+		if err != nil {
+			return err
+		}
+		if args[1] == "validate" {
+			_, err = fmt.Fprintln(out, "native stack declaration valid (no workloads launched)")
+			return err
+		}
+		plan, err := stack.DryRun(parsed)
+		if err != nil {
+			return err
+		}
+		data, err := json.MarshalIndent(plan, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(out, string(data))
+		return err
 	default:
 		return errors.New("unknown command (try help)")
 	}
@@ -65,12 +90,15 @@ Usage:
   gcontainers doctor
   gcontainers image verify OCI_LAYOUT_DIR
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
+
+gcontainers stack validate NATIVE_STACK_JSON
+  gcontainers stack plan NATIVE_STACK_JSON
   gcontainers validate BUNDLE_DIRECTORY
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
   gcontainers oci start|stop|delete --id NAME --experimental
   gcontainers oci state --id NAME
 Options for OCI commands: --runtime=crun|runc
-No images, networking, Compose or production deployment is implemented yet.`)
+No image pull/unpack, native stack execution, networking, Compose or production deployment is implemented yet.`)
 	return err
 }
 func doctor(w io.Writer) error {
