@@ -46,6 +46,11 @@ jobs:
           grep -Fq '"seccompVerified": false' "$d/kernel-probe.json"
           grep -Fq '"cgroupDelegationVerified": false' "$d/kernel-probe.json"
           grep -Fq '"deploymentAuthorized": false' "$d/kernel-probe.json"
+          if ./gcontainers __kernel-probe-child </dev/null > "$d/invalid-probe-child.json" 2>/dev/null; then
+            echo "Direct namespace helper invocation without parent data accepted" >&2
+            exit 1
+          fi
+          test ! -s "$d/invalid-probe-child.json"
           tar --format=ustar -cf "$d/layer.tar" -C "$d" blob
           layer_digest="sha256:$(sha256sum "$d/layer.tar" | cut -d' ' -f1)"
           ./gcontainers image verify-layer "$d/layer.tar" tar "$layer_digest" > "$d/layer-verified.json"
@@ -53,6 +58,15 @@ jobs:
           grep -Fq '"archiveSubsetValid": true' "$d/layer-verified.json"
           grep -Fq '"sourceProvenanceVerified": false' "$d/layer-verified.json"
           grep -Fq '"extractionAuthorized": false' "$d/layer-verified.json"
+          layer_bytes="$(wc -c < "$d/layer.tar" | tr -d '[:space:]')"
+          ./gcontainers image verify-layer "$d/layer.tar" tar "$layer_digest" "$layer_bytes" > "$d/layer-descriptor.json"
+          grep -Fq '"descriptorSizeVerified": true' "$d/layer-descriptor.json"
+          grep -Fq '"digestMatches": true' "$d/layer-descriptor.json"
+          grep -Fq '"extractionAuthorized": false' "$d/layer-descriptor.json"
+          if ./gcontainers image verify-layer "$d/layer.tar" tar "$layer_digest" "$((layer_bytes+1))" > "$d/layer-wrong-size.json" 2>/dev/null; then
+            echo "Wrong OCI descriptor compressed byte count accepted" >&2
+            exit 1
+          fi
           wrong_layer_digest="sha256:$(printf '%064d' 0)"
           if ./gcontainers image verify-layer "$d/layer.tar" tar "$wrong_layer_digest" > "$d/layer-mismatch.json" 2>/dev/null; then
             echo "Wrong OCI descriptor SHA256 accepted" >&2
@@ -115,6 +129,18 @@ jobs:
           grep -Fq '"deploymentAuthorized": false' "$d/preflight.json"
           grep -Fq '"liveStateVerified": false' "$d/preflight.json"
           grep -Fq '"rollbackVerified": false' "$d/preflight.json"
+          # A valid CPU/memory/source review must not implicitly grant
+          # GoreeCloud Identity authority for a proposed replica change.
+          sed '0,/"replicas": 1/s/"replicas": 1/"replicas": 2/' examples/native-stack.json > "$d/replica-changed-stack.json"
+          ./gcontainers stack validate "$d/replica-changed-stack.json"
+          if ./gcontainers stack preflight examples/native-stack.json "$d/replica-changed-stack.json" --expected-current-sha256 "$source_sha" --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/replica-review.json" 2>/dev/null; then
+            echo "Changed stack passed without authenticated Identity operator grant" >&2
+            exit 1
+          fi
+          grep -Fq '"sourceAndBudgetChecksPassed": true' "$d/replica-review.json"
+          grep -Fq '"goreeCloudIdentityReviewRequired": true' "$d/replica-review.json"
+          grep -Fq '"mipsAuthorizationVerified": false' "$d/replica-review.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/replica-review.json"
           if ./gcontainers stack preflight examples/native-stack.json examples/native-stack.json --expected-current-sha256 "$stale_sha" --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/preflight-stale.json" 2>/dev/null; then
             echo "Stale combined stack preflight unexpectedly passed" >&2
             exit 1
@@ -151,7 +177,7 @@ jobs:
           grep -Fq '"imageProvenanceVerified": false' "$d/image-change-preflight.json"
           grep -Fq '"wardveilReviewRequired": true' "$d/image-change-preflight.json"
           grep -Fq '"goreeShieldReviewRequired": true' "$d/image-change-preflight.json"
-          grep -Fq '"goreeCloudIdentityReviewRequired": false' "$d/image-change-preflight.json"
+          grep -Fq '"goreeCloudIdentityReviewRequired": true' "$d/image-change-preflight.json"
           if grep -Fq "$different_image" "$d/image-change-preflight.json"; then
             echo "Image digest leaked in privacy-minimized preflight report" >&2
             exit 1
