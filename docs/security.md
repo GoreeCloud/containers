@@ -53,3 +53,9 @@ OCI tar/gzip inspection now hard-limits compressed input with a reader that **er
 ## Local content-store integrity auditing
 
 The read-only image audit command opens an **existing** private user-owned blob store without creating or repairing it. It verifies the SHA-256 bytes of each committed regular file, rejects symlinks, unexpected names, hardlinks, oversized entries, more than 4096 entries, and aggregate audit sizes above 1 GiB. The summary intentionally omits sensitive paths and filenames. A passing audit proves observed byte integrity only, not provenance, signatures, malware safety, registry trust, or protection against same-user mutations after audit. Aggregate limits are verification bounds, **not disk reservations or enforcement of a global write quota**.
+
+## Detection of interrupted or active import staging
+
+Read-only image-store audits now also inventory bounded user-private temporary ingestion entries, reporting only counts and total staging bytes, never names or paths. A staging file may be actively written by another process or left after an interrupted import; either requires operator review. The audit rejects symlinks, unusual names, unsafe ownership, hardlinks and exceeded inspection limits but **does not delete, repair or garbage-collect content**. Reported storage totals are observational, not disk quotas or evidence of clean crash recovery.
+
+When any active or interrupted import staging entry exists, the aggregate audit deliberately reports verified=false and operatorReviewRequired=true. No unattended cleanup or false healthy status is permitted.

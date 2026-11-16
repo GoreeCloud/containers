@@ -104,3 +104,44 @@ func TestAuditCancellationAndEmptyStore(t *testing.T) {
 		t.Fatalf("empty store audit failed: %+v %v", report, err)
 	}
 }
+
+func TestAuditReportsUnresolvedOrActiveImportFilesWithoutDeleting(t *testing.T) {
+	s := testStore(t)
+	temp := filepath.Join(s.root, "tmp", ".ingest-"+strings.Repeat("a", 32))
+	if err := os.WriteFile(temp, []byte("unfinished opaque input"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := s.Audit(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Verified || report.PendingImportFiles != 1 ||
+		report.PendingImportBytes != int64(len("unfinished opaque input")) ||
+		!report.OperatorReviewRequired {
+		t.Fatalf("pending input was ignored: %+v", report)
+	}
+	if _, err := os.Stat(temp); err != nil {
+		t.Fatal("audit deleted a pending input")
+	}
+}
+func TestAuditRejectsUnknownOrSymlinkedImportFiles(t *testing.T) {
+	s := testStore(t)
+	dir := filepath.Join(s.root, "tmp")
+	unknown := filepath.Join(dir, "other")
+	if err := os.WriteFile(unknown, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Audit(context.Background()); err == nil {
+		t.Fatal("unknown staging name accepted")
+	}
+	if err := os.Remove(unknown); err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Join(dir, ".ingest-"+strings.Repeat("a", 32))
+	if err := os.Symlink("/etc/passwd", name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Audit(context.Background()); err == nil {
+		t.Fatal("symlinked staging entry accepted")
+	}
+}
