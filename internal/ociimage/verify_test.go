@@ -192,3 +192,65 @@ func FuzzOCIImageMetadataJSON(f *testing.F) {
 		_ = uniqueJSON(b)
 	})
 }
+
+func TestLayoutVerifierRejectsSymlinkedPaths(t *testing.T) {
+	f := newFixture(t)
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(f.root, alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyLayout(context.Background(), alias); err == nil {
+		t.Fatal("symlinked layout root accepted")
+	}
+	index := filepath.Join(f.root, "index.json")
+	if err := os.Remove(index); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc/passwd", index); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyLayout(context.Background(), f.root); err == nil {
+		t.Fatal("symlinked OCI index accepted")
+	}
+}
+func TestLayoutVerifierRejectsReplacedBlobDirectory(t *testing.T) {
+	f := newFixture(t)
+	dir := filepath.Join(f.root, "blobs", "sha256")
+	if err := os.Rename(dir, dir+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc", dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyLayout(context.Background(), f.root); err == nil {
+		t.Fatal("symlinked OCI blob directory accepted")
+	}
+}
+func TestLayoutVerifierRejectsTamperedManifest(t *testing.T) {
+	f := newFixture(t)
+	raw, err := os.ReadFile(filepath.Join(f.root, "index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var index map[string]any
+	if err := json.Unmarshal(raw, &index); err != nil {
+		t.Fatal(err)
+	}
+	entry := index["manifests"].([]any)[0].(map[string]any)
+	digest := entry["digest"].(string)
+	path := filepath.Join(f.root, "blobs", "sha256", strings.TrimPrefix(digest, "sha256:"))
+	manifest, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest) == 0 {
+		t.Fatal("empty fixture manifest")
+	}
+	manifest[0] ^= 1
+	if err := os.WriteFile(path, manifest, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyLayout(context.Background(), f.root); err == nil {
+		t.Fatal("tampered manifest accepted")
+	}
+}
