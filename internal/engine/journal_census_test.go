@@ -71,3 +71,39 @@ func TestJournalCensusRespectsCancellation(t *testing.T) {
 		t.Fatal("canceled census unexpectedly succeeded")
 	}
 }
+
+func TestJournalCensusDeterministicAcrossInsertionOrder(t *testing.T) {
+	root := journalFixture(t)
+	for _, id := range []string{"z-private", "a-private", "m-private"} {
+		_, err := RunJournaledMutation(context.Background(), root, id, "start", func() ([]byte, error) {
+			return nil, errors.New("simulated uncertainty")
+		})
+		if !errors.Is(err, ErrUnresolvedMutation) {
+			t.Fatal(err)
+		}
+	}
+	first, id1, err := inspectJournalOnce(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, id2, err := inspectJournalOnce(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != next || id1 != id2 || first.PendingCount != 3 || !first.RecoveryRequired {
+		t.Fatal("stable journal changed between deterministic scans")
+	}
+	// An operation-specific update changes the internal checksum even when
+	// the aggregate pending count is unchanged; no digest is exported.
+	marker := filepath.Join(root, "journal", "a-private.pending")
+	if err := os.WriteFile(marker, []byte(`{"version":1,"id":"a-private","operation":"create"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	changed, id3, err := inspectJournalOnce(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.PendingCount != 3 || id3 == id1 {
+		t.Fatal("same-size operation change missed")
+	}
+}

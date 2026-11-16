@@ -133,3 +133,5 @@ Cooperating OCI blob imports now take a private, no-follow, per-store exclusive 
 ## Explicit native transition overlap budget preflight
 
 The native transition-capacity command compares both old and target stack specifications with caller-supplied CPU, memory and maximum instance budgets. It conservatively assumes the two deployments may coexist if any service changes, returns nonzero on exceeded declared limits, and never marks deployment authorized or rollback verified. Even a no-op must fit its existing declared budget. **These are not live host reservations, health checks, staging admission, resource enforcement or rollback guarantees**; all changes still require operator review.
+
+The private journal census now compares two consecutive bounded, deterministic inventories (including redacted internal marker identities/operation kinds) and fails closed when they disagree. The internal comparison digest is deliberately never exposed. As with any observational read, a second successful pass does not lock or attest to external runtime state, and changes immediately afterward remain possible.
