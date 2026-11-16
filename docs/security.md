@@ -75,3 +75,7 @@ The full-store audit now enforces the same private ownership, no-extra-hardlink 
 ### Post-hash blob identity revalidation
 
 The read-only full-store integrity audit now rechecks every committed blob's opened-file and pathname identities, size, owner, private mode and link count after hashing but before accepting its digest. Synthetic tests prove detection of same-size pathname replacement and permission changes during an inspection. This is a bounded observational check, not an immutable filesystem snapshot, cryptographic source signature or malicious same-user write defense.
+
+### Digest-pinned offline OCI layer admission preview
+
+The new image verify-layer CLI requires a caller-provided exact SHA-256 digest, a clean absolute nonsymlink input path, and a bounded tar or tar+gzip archive. It hashes the exact compressed/source bytes in the same stream consumed by the strict archive inspector, then rechecks the pathname and file identity before returning a conservative structured report. A matching digest is NOT authenticated provenance or a signed manifest, and a structurally supported archive is NOT authorization to unpack, mount or run its contents. Whiteouts, links, devices, privilege metadata and other unsupported archive semantics remain denied.

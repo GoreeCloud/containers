@@ -32,6 +32,8 @@ go build -o gcontainers ./cmd/gcontainers
 # this is not a hard disk-space reservation or secure OCI extraction.
 ./gcontainers image verify /path/to/oci-layout
 ./gcontainers image inspect-layer /path/to/layer.tar tar
+# Offline exact descriptor digest + hostile-archive structural preflight:
+./gcontainers image verify-layer /absolute/local/layer.tar tar sha256:YOUR_VERIFIED_64_HEX_DIGEST
 # Optional experimental local blob import (opaque bytes only):
 ./gcontainers image import --store /home/you/private-image-store --file /path/to/blob --experimental
 ./gcontainers validate /path/to/oci-bundle

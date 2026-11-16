@@ -10,6 +10,7 @@
 | Aggregate committed OCI content quota for cooperating importers | Development | Private serialized writer, 1-GiB total committed bytes; advisory and bypassable by direct writes |
 | Private local SHA-256 blob storage/import | Development | M2 preview; bounded, atomically linked opaque blobs, no extraction/pull or production store acceptance |
 | Read-only bounded tar/gzip layer safety preflight | Development | M2 preview; fail closed on links, traversal, device nodes and unsupported formats; no extraction |
+| Digest-pinned offline OCI layer structural verification | Development | Single-pass SHA256 + bounded archive subset; no signature/unpack/run |
 | Full OCI image store, layer unpack and registry support | Planned | M2: no production image pull/build |
 | Rootless network, volumes and cgroups | Planned | M3 |
 | Native GoreeCloud stack format and runner | Planned | M4; not merely a Docker Compose wrapper |
