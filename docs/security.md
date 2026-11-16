@@ -63,3 +63,5 @@ The experimental real-runner adapter now creates a private, synchronized, exclus
 ## Privacy-minimized runtime incident census
 
 The read-only pending-summary CLI inventories a bounded private journal, rejects symlinks, unknown entries and malformed intent records, and reports only aggregate counts of incomplete create/start/stop/delete operations. It does **not expose container identifiers, process PIDs, bundle paths or secrets**. An unresolved intent produces a nonzero exit status and requires operator review. It does not query real OCI processes, detect journal entries removed externally, or repair runtime state. Summaries may change during concurrent activity and cannot be treated as stable snapshots.
+
+The private journal census now compares two consecutive bounded, deterministic inventories (including redacted internal marker identities/operation kinds) and fails closed when they disagree. The internal comparison digest is deliberately never exposed. As with any observational read, a second successful pass does not lock or attest to external runtime state, and changes immediately afterward remain possible.
