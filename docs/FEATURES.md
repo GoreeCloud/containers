@@ -5,6 +5,7 @@
 | First-party Go command-line prototype | Development | cmd/gcontainers; Linux CI |
 | OCI bundle policy validation | Development | internal/bundle; strict process bounds and caller-only UID/GID mapping and reviewed external runtime version preflight; no guarantee of isolation |
 | Read-only OCI incident census | Development | Private per-operation aggregate counts; nonzero on unresolved mutation; no process state attestation |
+| Inert first-party kernel namespace probe | Development | User/mount/PID/IPC/UTS/net separation observation, not OCI confinement or deployment acceptance |
 | OCI lifecycle adapter via crun/runc | Development | internal/engine; cooperative cross-process per-ID locking; real kernel runtime acceptance open |
 | Read-only OCI image layout integrity verifier | Development | M2 preview; hashes referenced blobs, rejects external references and malformed layouts; no unpack/import/pull |
 | Nonmutating local image-store audit | Development | Re-verifies committed blob bytes and rejects invalid names, links and oversized aggregate storage; not authenticated image provenance |

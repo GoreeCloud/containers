@@ -167,3 +167,7 @@ The read-only full-store integrity audit now rechecks every committed blob's ope
 ### MIPS-sensitive secret-reference change gate
 
 The source-only native preflight counts (but does not name or resolve) services whose secret references are introduced, removed or changed. It separately flags GoreeCloud Identity (authorization), GoreeShield (privacy and consent), and Wardveil (cybersecurity policy) for review; it explicitly reports MIPS authorization as unverified and exits unsuccessfully for sensitive changes. This is an offline safety gate, not an implemented policy provider, grant mechanism or proof of approved deployment.
+
+### Inert first-party kernel namespace probe
+
+The new gcontainers kernel-probe command creates only an unprivileged copy of its own first-party executable with isolated user, mount, PID, IPC, UTS and network namespace flags and single-caller UID/GID mapping. It compares namespace identities and reports only booleans, not inode identifiers, PIDs, or secret values. No rootfs is mounted and no OCI binary, application, image, networking, or cgroup is configured. Passing namespace creation NEVER verifies OCI isolation, cgroup delegation, seccomp, LSM or runtime provenance and cannot authorize a deployment. A denied clone is reported as unverified rather than bypassed.

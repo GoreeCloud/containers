@@ -40,6 +40,16 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "help", "--help", "-h":
 		return usage(out)
+	case "__kernel-probe-child":
+		if len(args) != 1 {
+			return errors.New("kernel probe child takes no arguments")
+		}
+		return runKernelProbeChild(out)
+	case "kernel-probe":
+		if len(args) != 1 {
+			return errors.New("kernel-probe takes no flags")
+		}
+		return runKernelProbe(out)
 	case "doctor":
 		if len(args) != 1 {
 			return errors.New("doctor takes no arguments")
@@ -159,6 +169,7 @@ func usage(w io.Writer) error {
 	_, err := fmt.Fprintln(w, `GoreeCloud Containers 0.1.0-dev — Linux rootless OCI preview
 Usage:
   gcontainers doctor
+  gcontainers kernel-probe  # inert rootless namespace check, NOT OCI acceptance
   gcontainers image audit --store ABS_EXISTING_STORE_DIR
   gcontainers image verify OCI_LAYOUT_DIR
   gcontainers image inspect-layer TAR_FILE tar|tar+gzip

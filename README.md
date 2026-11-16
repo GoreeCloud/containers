@@ -57,6 +57,8 @@ source_sha="$(./gcontainers stack plan examples/native-stack.json | sed -nE 's/^
 
 # Read-only source revision, declared resource overlap and blast-radius checks together:
 ./gcontainers stack preflight examples/native-stack.json examples/native-stack.json --expected-current-sha256 "$source_sha" --cpu-milli 4000 --memory-mib 2048 --max-instances 16
+# First-party inert Linux rootless namespace check (no OCI workload):
+./gcontainers kernel-probe
 ./gcontainers validate /path/to/oci-bundle
 ```
 
