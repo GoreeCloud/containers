@@ -129,3 +129,7 @@ The read-only pending-summary CLI inventories a bounded private journal, rejects
 ## Advisory aggregate committed-blob quota
 
 Cooperating OCI blob imports now take a private, no-follow, per-store exclusive filesystem lock before inspecting committed digest bytes and pending ingestion files. New unique commits are rejected when they would exceed a 1 GiB aggregate committed-byte preview quota; verified same-digest imports deduplicate without consuming more capacity. The lock is held through the temporary ingest and hardlink commit. This bounds committed content for cooperating import paths, but **does not reserve temporary-disk space**, cannot stop same-user direct filesystem writes or malicious bypasses, and cannot guarantee free host disk or safe eviction. Full store recovery, monitored filesystem capacity and actual quota enforcement remain Stable release gates.
+
+## Explicit native transition overlap budget preflight
+
+The native transition-capacity command compares both old and target stack specifications with caller-supplied CPU, memory and maximum instance budgets. It conservatively assumes the two deployments may coexist if any service changes, returns nonzero on exceeded declared limits, and never marks deployment authorized or rollback verified. Even a no-op must fit its existing declared budget. **These are not live host reservations, health checks, staging admission, resource enforcement or rollback guarantees**; all changes still require operator review.

@@ -78,6 +78,9 @@ func run(args []string, out io.Writer) error {
 		_, err = fmt.Fprintln(out, string(payload))
 		return err
 	case "stack":
+		if len(args) >= 4 && args[1] == "transition-capacity" {
+			return stackTransitionCapacity(args[2:], out)
+		}
 		if len(args) == 4 && args[1] == "impact" {
 			old, err := stack.Load(args[2])
 			if err != nil {
@@ -159,6 +162,7 @@ gcontainers host inspect
   gcontainers stack plan NATIVE_STACK_JSON
   gcontainers stack diff OLD_STACK_JSON NEW_STACK_JSON
   gcontainers stack impact OLD_STACK_JSON NEW_STACK_JSON
+  gcontainers stack transition-capacity OLD_STACK_JSON NEW_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
   gcontainers stack capacity NATIVE_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
   gcontainers validate BUNDLE_DIRECTORY
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
@@ -506,6 +510,50 @@ func stackCapacity(args []string, out io.Writer) error {
 	}
 	if !review.WithinLimits {
 		return errors.New("native stack capacity budget exceeded; review blockers")
+	}
+	return nil
+}
+
+// stackTransitionCapacity applies ONLY explicit user-provided budgets to an
+// old+new coexistence estimate; success never approves actual deployment.
+func stackTransitionCapacity(args []string, out io.Writer) error {
+	if len(args) < 3 {
+		return errors.New("usage: stack transition-capacity OLD_JSON NEW_JSON --cpu-milli N --memory-mib N --max-instances N")
+	}
+	flags := flag.NewFlagSet("stack transition-capacity", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	cpu := flags.Int64("cpu-milli", 0, "declared CPU budget in millicores")
+	memoryMiB := flags.Int64("memory-mib", 0, "declared memory budget in MiB")
+	instances := flags.Int("max-instances", 0, "declared max count of instances")
+	if err := flags.Parse(args[2:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || *memoryMiB <= 0 || *memoryMiB > math.MaxInt64/(1<<20) {
+		return errors.New("invalid transition capacity budget flags")
+	}
+	before, err := stack.Load(args[0])
+	if err != nil {
+		return err
+	}
+	after, err := stack.Load(args[1])
+	if err != nil {
+		return err
+	}
+	report, err := stack.AssessTransitionCapacity(before, after, stack.ResourceBudget{
+		CPUMilli: *cpu, MemoryBytes: *memoryMiB * (1 << 20), MaxInstances: *instances,
+	})
+	if err != nil {
+		return err
+	}
+	encoded, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	if _, err = fmt.Fprintln(out, string(encoded)); err != nil {
+		return err
+	}
+	if !report.WithinBudget {
+		return errors.New("native transition overlap exceeds supplied resource budget; manual review required")
 	}
 	return nil
 }

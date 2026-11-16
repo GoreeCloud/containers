@@ -49,6 +49,8 @@ go build -o gcontainers ./cmd/gcontainers
 ./gcontainers stack diff examples/native-stack.json examples/native-stack.json
 # Conservative dependency blast-radius and overlapping resource estimate:
 ./gcontainers stack impact examples/native-stack.json examples/native-stack.json
+# Pessimistic old+new overlap check, not a scheduler or deployment authorization:
+./gcontainers stack transition-capacity examples/native-stack.json examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16
 ./gcontainers validate /path/to/oci-bundle
 ```
 
