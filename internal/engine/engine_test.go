@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,5 +83,35 @@ func TestStateRoot(t *testing.T) {
 	}
 	if _, err := PrepareStateRoot(base); err == nil {
 		t.Fatal("public runtime dir accepted")
+	}
+}
+
+func TestBoundedRuntimeOutput(t *testing.T) {
+	output := &boundedOutput{}
+	payload := make([]byte, maxRuntimeOutput+4096)
+	n, err := output.Write(payload)
+	if err != nil || n != len(payload) || !output.truncated || len(output.data) != maxRuntimeOutput {
+		t.Fatal("bounded output did not truncate safely")
+	}
+}
+func TestRuntimeEnvironmentIsScoped(t *testing.T) {
+	t.Setenv("GOREECLOUD_TEST_CREDENTIAL", "secret-canary")
+	for _, value := range filteredRuntimeEnv() {
+		if strings.Contains(value, "secret-canary") || strings.HasPrefix(value, "GOREECLOUD_TEST_CREDENTIAL=") {
+			t.Fatal("runtime environment leaked unrelated variable")
+		}
+	}
+}
+
+func TestRejectUntrustedExecutable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "crun")
+	if err := os.WriteFile(path, []byte("fake"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := TrustedRuntimeBinary(path); err == nil {
+		t.Fatal("untrusted user executable accepted")
+	}
+	if err := TrustedRuntimeBinary("../crun"); err == nil {
+		t.Fatal("relative runtime path accepted")
 	}
 }

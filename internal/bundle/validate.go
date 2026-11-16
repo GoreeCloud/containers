@@ -77,49 +77,55 @@ type Mount struct {
 	Options     []string `json:"options"`
 }
 
+// Validate checks the restricted bundle profile without running a container.
+func Validate(dir string) error { _, err := Load(dir); return err }
+
 // Validate reads no more than 1 MiB and never executes a bundle.
-func Validate(dir string) error {
+func Load(dir string) (*Spec, error) {
 	bundleDir, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		return fmt.Errorf("bundle directory: %w", err)
+		return nil, fmt.Errorf("bundle directory: %w", err)
 	}
 	fi, err := os.Stat(bundleDir)
 	if err != nil || !fi.IsDir() {
-		return errors.New("bundle must be a directory")
+		return nil, errors.New("bundle must be a directory")
 	}
 	path := filepath.Join(bundleDir, "config.json")
 	info, err := os.Lstat(path)
 	if err != nil {
-		return fmt.Errorf("OCI config: %w", err)
+		return nil, fmt.Errorf("OCI config: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return errors.New("OCI config must be a regular file (not a symlink)")
+		return nil, errors.New("OCI config must be a regular file (not a symlink)")
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("OCI config: %w", err)
+		return nil, fmt.Errorf("OCI config: %w", err)
 	}
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, MaxConfigBytes+1))
 	if err != nil {
-		return errors.New("unable to read OCI config")
+		return nil, errors.New("unable to read OCI config")
 	}
 	if len(b) > MaxConfigBytes {
-		return errors.New("OCI config exceeds 1 MiB limit")
+		return nil, errors.New("OCI config exceeds 1 MiB limit")
 	}
 	if err := rejectDuplicateKeys(b); err != nil {
-		return fmt.Errorf("OCI JSON: %w", err)
+		return nil, fmt.Errorf("OCI JSON: %w", err)
 	}
 	var spec Spec
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&spec); err != nil {
-		return fmt.Errorf("unsupported or invalid OCI config: %w", err)
+		return nil, fmt.Errorf("unsupported or invalid OCI config: %w", err)
 	}
 	if err := d.Decode(new(any)); err != io.EOF {
-		return errors.New("OCI config has trailing data")
+		return nil, errors.New("OCI config has trailing data")
 	}
-	return validateSpec(&spec, bundleDir)
+	if err := validateSpec(&spec, bundleDir); err != nil {
+		return nil, err
+	}
+	return &spec, nil
 }
 
 func validateSpec(s *Spec, dir string) error {
@@ -131,6 +137,9 @@ func validateSpec(s *Spec, dir string) error {
 	}
 	if s.Process.Terminal || !s.Process.NoNewPrivileges || len(s.Process.Args) == 0 || s.Process.Args[0] == "" {
 		return errors.New("noninteractive process, arguments and noNewPrivileges=true required")
+	}
+	if err := validateProcess(s.Process); err != nil {
+		return err
 	}
 	c := s.Process.Capabilities
 	if c == nil || len(c.Bounding)+len(c.Effective)+len(c.Inheritable)+len(c.Permitted)+len(c.Ambient) != 0 {
@@ -182,42 +191,136 @@ func validateSpec(s *Spec, dir string) error {
 	default:
 		return errors.New("seccomp default must deny unlisted syscalls")
 	}
+
 	destinations := map[string]bool{}
-	types := map[string]bool{"proc": true, "tmpfs": true, "devpts": true, "mqueue": true, "sysfs": true}
 	for _, m := range s.Mounts {
-		if !strings.HasPrefix(m.Destination, "/") || filepath.Clean(m.Destination) != m.Destination || destinations[m.Destination] || !types[m.Type] {
-			return errors.New("unsupported or duplicate mount")
+		if destinations[m.Destination] {
+			return errors.New("duplicate mount destination")
 		}
 		destinations[m.Destination] = true
-		if m.Source != "" && m.Source != m.Type {
-			return errors.New("external mount sources prohibited")
+		if !strings.HasPrefix(m.Destination, "/") || filepath.Clean(m.Destination) != m.Destination {
+			return errors.New("invalid mount destination")
 		}
-		for _, option := range m.Options {
-			if option == "bind" || option == "rbind" || option == "rw" || option == "shared" || option == "rshared" {
-				return errors.New("writable, shared and bind mount options prohibited")
+		switch m.Type {
+		case "proc":
+			if m.Destination != "/proc" || m.Source != "proc" || !onlyOptions(m.Options, "ro", "nosuid", "noexec", "nodev") {
+				return errors.New("unsupported proc mount policy")
+			}
+		case "tmpfs":
+			if m.Destination != "/tmp" || m.Source != "tmpfs" || !onlyOptions(m.Options, "nosuid", "noexec", "nodev", "size=67108864", "mode=1777") {
+				return errors.New("unsupported tmpfs mount policy")
+			}
+			if !hasOption(m.Options, "size=67108864") || !hasOption(m.Options, "nosuid") || !hasOption(m.Options, "nodev") {
+				return errors.New("tmpfs must be memory-limited and protected")
+			}
+		default:
+			return errors.New("unsupported mount type")
+		}
+	}
+	if len(s.Linux.Seccomp.Flags) > 0 {
+		return errors.New("seccomp flags must be reviewed before support")
+	}
+	for _, raw := range s.Linux.Seccomp.Syscalls {
+		var rule struct {
+			Names  []string          `json:"names"`
+			Action string            `json:"action"`
+			Args   []json.RawMessage `json:"args"`
+		}
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&rule); err != nil {
+			return errors.New("invalid seccomp rule")
+		}
+		if len(rule.Names) == 0 || len(rule.Args) != 0 {
+			return errors.New("empty or argument-filtered seccomp rule is unsupported")
+		}
+		switch rule.Action {
+		case "SCMP_ACT_ALLOW", "SCMP_ACT_ERRNO", "SCMP_ACT_KILL", "SCMP_ACT_KILL_PROCESS", "SCMP_ACT_KILL_THREAD":
+		default:
+			return errors.New("unsupported seccomp rule action")
+		}
+		for _, name := range rule.Names {
+			if name == "" || strings.ContainsAny(name, " /\\") {
+				return errors.New("invalid syscall name")
+			}
+			if rule.Action == "SCMP_ACT_ALLOW" && forbiddenSyscall(name) {
+				return errors.New("dangerous syscall cannot be allowed by preview profile")
 			}
 		}
 	}
 	return nil
 }
 
+func hasOption(options []string, wanted string) bool {
+	for _, o := range options {
+		if o == wanted {
+			return true
+		}
+	}
+	return false
+}
+func onlyOptions(options []string, allowed ...string) bool {
+	seen := map[string]bool{}
+	for _, o := range options {
+		if seen[o] {
+			return false
+		}
+		seen[o] = true
+		found := false
+		for _, a := range allowed {
+			if o == a {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+func forbiddenSyscall(name string) bool {
+	switch name {
+	case "mount", "umount2", "pivot_root", "ptrace", "bpf", "userfaultfd",
+		"open_by_handle_at", "io_uring_setup", "clone3", "unshare", "setns",
+		"init_module", "finit_module", "delete_module", "kexec_load",
+		"kexec_file_load", "perf_event_open", "keyctl", "add_key", "request_key",
+		"swapon", "swapoff", "reboot", "iopl", "ioperm", "syslog":
+		return true
+	default:
+		return false
+	}
+}
+
 func validMaps(maps []IDMap) bool {
-	if len(maps) == 0 {
+	if len(maps) == 0 || len(maps) > 5 {
 		return false
 	}
 	rootMapped := false
-	for _, m := range maps {
+	for i, m := range maps {
 		if m.Size == 0 || m.HostID == 0 {
+			return false
+		}
+		hc := uint64(m.HostID) + uint64(m.Size)
+		cc := uint64(m.ContainerID) + uint64(m.Size)
+		if hc > 1<<32 || cc > 1<<32 {
 			return false
 		}
 		if m.ContainerID == 0 {
 			rootMapped = true
 		}
-		if uint64(m.HostID)+uint64(m.Size) > 1<<32 || uint64(m.ContainerID)+uint64(m.Size) > 1<<32 {
-			return false
+		for j := 0; j < i; j++ {
+			prior := maps[j]
+			if rangesOverlap(uint64(m.HostID), hc, uint64(prior.HostID), uint64(prior.HostID)+uint64(prior.Size)) ||
+				rangesOverlap(uint64(m.ContainerID), cc, uint64(prior.ContainerID), uint64(prior.ContainerID)+uint64(prior.Size)) {
+				return false
+			}
 		}
 	}
 	return rootMapped
+}
+func rangesOverlap(aStart, aEnd, bStart, bEnd uint64) bool {
+	return aStart < bEnd && bStart < aEnd
 }
 
 func rejectDuplicateKeys(data []byte) error {
@@ -274,4 +377,66 @@ func walkJSON(d *json.Decoder, depth int) error {
 		return errors.New("invalid JSON delimiter")
 	}
 	return err
+}
+
+// validateProcess bounds mutable process metadata in the strict preview
+// profile. It does not certify a root filesystem or syscall allowlist.
+func validateProcess(p *Process) error {
+	if len(p.Args) > 64 || !strings.HasPrefix(p.Args[0], "/") || filepath.Clean(p.Args[0]) != p.Args[0] {
+		return errors.New("preview process requires clean absolute executable and at most 64 arguments")
+	}
+	total := 0
+	for _, arg := range p.Args {
+		if len(arg) > 4096 || strings.IndexByte(arg, 0) >= 0 {
+			return errors.New("invalid process argument")
+		}
+		total += len(arg)
+	}
+	if total > 64<<10 || len(p.Env) > 128 {
+		return errors.New("process arguments/environment exceed preview quota")
+	}
+	if !strings.HasPrefix(p.Cwd, "/") || filepath.Clean(p.Cwd) != p.Cwd {
+		return errors.New("process working directory must be clean and absolute")
+	}
+	seen := map[string]bool{}
+	for _, entry := range p.Env {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok || key == "" || len(entry) > 4096 || strings.IndexByte(entry, 0) >= 0 {
+			return errors.New("invalid process environment entry")
+		}
+		for i, ch := range key {
+			if !(ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' || ch == '_' || i > 0 && ch >= '0' && ch <= '9') {
+				return errors.New("invalid process environment key")
+			}
+		}
+		if seen[key] {
+			return errors.New("duplicate process environment key")
+		}
+		seen[key] = true
+		total += len(entry)
+	}
+	if total > 128<<10 {
+		return errors.New("process arguments/environment exceed total quota")
+	}
+	return nil
+}
+
+// RequireSingleCallerMapping is a deliberately narrow preview gate: container
+// UID/GID 0 may map only to the invoking non-root host user and primary group.
+// Subordinate ranges are deliberately unsupported until delegation is audited.
+func RequireSingleCallerMapping(s *Spec, uid, gid uint32) error {
+	if s == nil || s.Linux == nil || s.Process == nil || uid == 0 || gid == 0 {
+		return errors.New("nonroot invoking user/group required")
+	}
+	if len(s.Linux.UIDMappings) != 1 || len(s.Linux.GIDMappings) != 1 ||
+		s.Process.User.UID != 0 || s.Process.User.GID != 0 {
+		return errors.New("preview requires one container-root mapping")
+	}
+	u := s.Linux.UIDMappings[0]
+	g := s.Linux.GIDMappings[0]
+	if u.ContainerID != 0 || u.HostID != uid || u.Size != 1 ||
+		g.ContainerID != 0 || g.HostID != gid || g.Size != 1 {
+		return errors.New("host mapping must match invoking user/group")
+	}
+	return nil
 }

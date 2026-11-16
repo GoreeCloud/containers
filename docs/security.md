@@ -15,7 +15,7 @@
 ## Residual risks / unimplemented controls
 
 - The OCI bundle/rootfs can change between validation and execution (TOCTOU). File-descriptor-based traversal, immutable snapshots and secure extraction are not yet implemented.
-- A deny-by-default seccomp action does **not** guarantee a safe profile: allowed syscalls must be reviewed. The current preview does not verify all Linux security settings of the low-level runtime or host.
+- A deny-by-default seccomp action and a limited preview dangerous-syscall denial list do **not** guarantee a safe profile: allowed syscalls must be reviewed. The current preview does not verify all Linux security settings of the low-level runtime or host.
 - Rootless namespaces and UID mappings may be unsupported or configured differently on hosts. Host LSM (AppArmor/SELinux), cgroup delegation, network policies and real capability bounding are not end-to-end tested.
 - The Go preview profile covers only a restricted subset of OCI config fields; complex bundles are intentionally rejected.
 - No image provenance, signatures, vulnerability scanning, SBOM, registry authentication, secret injection, runtime event logs, multiuser authorization or recovery exercises.
@@ -25,3 +25,11 @@
 ## Acceptance before deployment
 
 Dedicated rootless test host; kernel namespace/cgroup/LSM/seccomp experiments; malicious-bundle tests including symlink races, mount/device escape, UID mapping collisions and hostile rootfs; API threat model; dependency SBOM and vulnerability review; registry extraction/verification; credential scoping; backup and restore; resource exhaustion; failure injection and rollback. Independently review against GoreeShield and Wardveil requirements.
+
+## Incremental M1 hardening draft
+
+The runtime preview now limits captured OCI runtime output to 64 KiB, restricts child process environment, rejects intersecting UID/GID maps and refuses unsupported mount parameters, seccomp flags, and a defined set of dangerous allowed syscalls. This is incomplete defense in depth, **not** Linux kernel isolation acceptance; full default-deny syscall allowlists, descriptor-safe bundle snapshots, subprocess lifecycle recovery, and LSM/cgroup verification remain required.
+
+## M1 caller mapping and executable preflight
+
+The development adapter now refuses executing OCI bundles whose container UID/GID 0 are not mapped **exactly and exclusively** to the invoking nonroot host user and primary group (one mapping of size 1 each). It also bounds process arguments and environment metadata, requires clean absolute executable and working-directory paths, and rejects duplicate or invalid environment names. Before CLI execution it requires a root-owned, non-group/world-writable crun or runc binary in an approved system directory. This is a conservative restriction, not proof that the binary, its dependencies, its distribution package, or the host kernel are trusted. Multiuser subordinate UID/GID ranges, writable mounts, privileged containers, general OCI compatibility, immutable bundle snapshots and actual rootless kernel confinement remain unsupported or unverified.
