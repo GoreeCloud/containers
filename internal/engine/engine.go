@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"syscall"
+	"time"
 
 	"github.com/GoreeCloud/containers/internal/bundle"
 )
@@ -21,12 +22,52 @@ type Runner interface {
 }
 type ProcessRunner struct{}
 
+const maxRuntimeOutput = 64 << 10
+
+type boundedOutput struct {
+	data      []byte
+	truncated bool
+}
+
+func (w *boundedOutput) Write(p []byte) (int, error) {
+	original := len(p)
+	remaining := maxRuntimeOutput - len(w.data)
+	if remaining > 0 {
+		count := remaining
+		if count > len(p) {
+			count = len(p)
+		}
+		w.data = append(w.data, p[:count]...)
+	}
+	if original > remaining {
+		w.truncated = true
+	}
+	return original, nil
+}
+func filteredRuntimeEnv() []string {
+	names := []string{"HOME", "PATH", "LANG", "LC_ALL", "XDG_RUNTIME_DIR"}
+	env := make([]string, 0, len(names))
+	for _, name := range names {
+		if value, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+value)
+		}
+	}
+	return env
+}
 func (ProcessRunner) Run(ctx context.Context, binary string, args ...string) ([]byte, error) {
-	out, err := exec.CommandContext(ctx, binary, args...).CombinedOutput()
-	if err != nil {
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Env = filteredRuntimeEnv()
+	cmd.WaitDelay = 2 * time.Second
+	output := &boundedOutput{}
+	cmd.Stdout = output
+	cmd.Stderr = output
+	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("OCI runtime operation failed: %w", err)
 	}
-	return out, nil
+	if output.truncated {
+		return nil, errors.New("OCI runtime response exceeded 64 KiB")
+	}
+	return output.data, nil
 }
 
 type Engine struct {

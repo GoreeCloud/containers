@@ -80,3 +80,33 @@ func TestTooLargeAndSymlink(t *testing.T) {
 		t.Fatal("symlink accepted")
 	}
 }
+
+func TestMappingsRejectOverlaps(t *testing.T) {
+	cases := [][]IDMap{
+		{{ContainerID: 0, HostID: 1000, Size: 10}, {ContainerID: 10, HostID: 1005, Size: 10}},
+		{{ContainerID: 0, HostID: 1000, Size: 10}, {ContainerID: 5, HostID: 2000, Size: 10}},
+		{{ContainerID: 0, HostID: 0, Size: 1}},
+		{{ContainerID: 0, HostID: 1000, Size: 0}},
+	}
+	for _, maps := range cases {
+		if validMaps(maps) {
+			t.Errorf("overlap/invalid mapping accepted: %+v", maps)
+		}
+	}
+	if !validMaps([]IDMap{{ContainerID: 0, HostID: 1000, Size: 10}, {ContainerID: 10, HostID: 2000, Size: 10}}) {
+		t.Fatal("non-overlapping mappings rejected")
+	}
+}
+func TestPreviewMountAndSeccompRestrictions(t *testing.T) {
+	cases := []string{
+		strings.Replace(safeSpec, "\"linux\":", "\"mounts\":[{\"destination\":\"/tmp\",\"type\":\"tmpfs\",\"source\":\"tmpfs\",\"options\":[\"size=99999999\"]}],\"linux\":", 1),
+		strings.Replace(safeSpec, "\"linux\":", "\"mounts\":[{\"destination\":\"/proc\",\"type\":\"proc\",\"source\":\"proc\",\"options\":[\"rw\"]}],\"linux\":", 1),
+		strings.Replace(safeSpec, "\"defaultAction\":\"SCMP_ACT_ERRNO\"", "\"defaultAction\":\"SCMP_ACT_ERRNO\",\"syscalls\":[{\"names\":[\"mount\"],\"action\":\"SCMP_ACT_ALLOW\"}]", 1),
+		strings.Replace(safeSpec, "\"defaultAction\":\"SCMP_ACT_ERRNO\"", "\"defaultAction\":\"SCMP_ACT_ERRNO\",\"flags\":[\"SECCOMP_FILTER_FLAG_TSYNC\"]", 1),
+	}
+	for _, raw := range cases {
+		if err := Validate(setup(t, raw)); err == nil {
+			t.Fatal("unsafe mount/seccomp config accepted")
+		}
+	}
+}

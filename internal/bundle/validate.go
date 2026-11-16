@@ -182,42 +182,136 @@ func validateSpec(s *Spec, dir string) error {
 	default:
 		return errors.New("seccomp default must deny unlisted syscalls")
 	}
+
 	destinations := map[string]bool{}
-	types := map[string]bool{"proc": true, "tmpfs": true, "devpts": true, "mqueue": true, "sysfs": true}
 	for _, m := range s.Mounts {
-		if !strings.HasPrefix(m.Destination, "/") || filepath.Clean(m.Destination) != m.Destination || destinations[m.Destination] || !types[m.Type] {
-			return errors.New("unsupported or duplicate mount")
+		if destinations[m.Destination] {
+			return errors.New("duplicate mount destination")
 		}
 		destinations[m.Destination] = true
-		if m.Source != "" && m.Source != m.Type {
-			return errors.New("external mount sources prohibited")
+		if !strings.HasPrefix(m.Destination, "/") || filepath.Clean(m.Destination) != m.Destination {
+			return errors.New("invalid mount destination")
 		}
-		for _, option := range m.Options {
-			if option == "bind" || option == "rbind" || option == "rw" || option == "shared" || option == "rshared" {
-				return errors.New("writable, shared and bind mount options prohibited")
+		switch m.Type {
+		case "proc":
+			if m.Destination != "/proc" || m.Source != "proc" || !onlyOptions(m.Options, "ro", "nosuid", "noexec", "nodev") {
+				return errors.New("unsupported proc mount policy")
+			}
+		case "tmpfs":
+			if m.Destination != "/tmp" || m.Source != "tmpfs" || !onlyOptions(m.Options, "nosuid", "noexec", "nodev", "size=67108864", "mode=1777") {
+				return errors.New("unsupported tmpfs mount policy")
+			}
+			if !hasOption(m.Options, "size=67108864") || !hasOption(m.Options, "nosuid") || !hasOption(m.Options, "nodev") {
+				return errors.New("tmpfs must be memory-limited and protected")
+			}
+		default:
+			return errors.New("unsupported mount type")
+		}
+	}
+	if len(s.Linux.Seccomp.Flags) > 0 {
+		return errors.New("seccomp flags must be reviewed before support")
+	}
+	for _, raw := range s.Linux.Seccomp.Syscalls {
+		var rule struct {
+			Names  []string          `json:"names"`
+			Action string            `json:"action"`
+			Args   []json.RawMessage `json:"args"`
+		}
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&rule); err != nil {
+			return errors.New("invalid seccomp rule")
+		}
+		if len(rule.Names) == 0 || len(rule.Args) != 0 {
+			return errors.New("empty or argument-filtered seccomp rule is unsupported")
+		}
+		switch rule.Action {
+		case "SCMP_ACT_ALLOW", "SCMP_ACT_ERRNO", "SCMP_ACT_KILL", "SCMP_ACT_KILL_PROCESS", "SCMP_ACT_KILL_THREAD":
+		default:
+			return errors.New("unsupported seccomp rule action")
+		}
+		for _, name := range rule.Names {
+			if name == "" || strings.ContainsAny(name, " /\\") {
+				return errors.New("invalid syscall name")
+			}
+			if rule.Action == "SCMP_ACT_ALLOW" && forbiddenSyscall(name) {
+				return errors.New("dangerous syscall cannot be allowed by preview profile")
 			}
 		}
 	}
 	return nil
 }
 
+func hasOption(options []string, wanted string) bool {
+	for _, o := range options {
+		if o == wanted {
+			return true
+		}
+	}
+	return false
+}
+func onlyOptions(options []string, allowed ...string) bool {
+	seen := map[string]bool{}
+	for _, o := range options {
+		if seen[o] {
+			return false
+		}
+		seen[o] = true
+		found := false
+		for _, a := range allowed {
+			if o == a {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+func forbiddenSyscall(name string) bool {
+	switch name {
+	case "mount", "umount2", "pivot_root", "ptrace", "bpf", "userfaultfd",
+		"open_by_handle_at", "io_uring_setup", "clone3", "unshare", "setns",
+		"init_module", "finit_module", "delete_module", "kexec_load",
+		"kexec_file_load", "perf_event_open", "keyctl", "add_key", "request_key",
+		"swapon", "swapoff", "reboot", "iopl", "ioperm", "syslog":
+		return true
+	default:
+		return false
+	}
+}
+
 func validMaps(maps []IDMap) bool {
-	if len(maps) == 0 {
+	if len(maps) == 0 || len(maps) > 5 {
 		return false
 	}
 	rootMapped := false
-	for _, m := range maps {
+	for i, m := range maps {
 		if m.Size == 0 || m.HostID == 0 {
+			return false
+		}
+		hc := uint64(m.HostID) + uint64(m.Size)
+		cc := uint64(m.ContainerID) + uint64(m.Size)
+		if hc > 1<<32 || cc > 1<<32 {
 			return false
 		}
 		if m.ContainerID == 0 {
 			rootMapped = true
 		}
-		if uint64(m.HostID)+uint64(m.Size) > 1<<32 || uint64(m.ContainerID)+uint64(m.Size) > 1<<32 {
-			return false
+		for j := 0; j < i; j++ {
+			prior := maps[j]
+			if rangesOverlap(uint64(m.HostID), hc, uint64(prior.HostID), uint64(prior.HostID)+uint64(prior.Size)) ||
+				rangesOverlap(uint64(m.ContainerID), cc, uint64(prior.ContainerID), uint64(prior.ContainerID)+uint64(prior.Size)) {
+				return false
+			}
 		}
 	}
 	return rootMapped
+}
+func rangesOverlap(aStart, aEnd, bStart, bEnd uint64) bool {
+	return aStart < bEnd && bStart < aEnd
 }
 
 func rejectDuplicateKeys(data []byte) error {
