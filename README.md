@@ -11,6 +11,9 @@ GoreeCloud Containers is being built as the eventual default containerization so
 - `gcontainers doctor`: a read-only report of local Linux and OCI runtime prerequisites.
 - `gcontainers validate <bundle-directory>`: fail-closed parsing of a restricted rootless OCI bundle policy. Includes file-size and JSON nesting limits, duplicate-key rejection, and restrictions on host namespaces, root filesystem, capabilities, devices, hooks, writable/bind mounts, and seccomp defaults.
 - `gcontainers oci create|start|state|stop|delete`: a GoreeCloud-owned lifecycle adapter that invokes an external, replaceable OCI low-level runtime (`crun` or `runc`) directly, without Docker, Podman, containerd, a shell, or a background daemon. Mutations require `--experimental`; runtime state is stored in a private per-user directory and deletion is never forced.
+- Private local SHA-256 content-addressed blob store with bounded, directory-handle-anchored, atomic, deduplicated imports (requires explicit experimental confirmation; **no image unpack, registry client or container execution**).
+- Read-only OCI image-layout integrity verification: referenced SHA-256 blobs, descriptor sizes, metadata limits, no downloads or extraction. Supported OCI media types are intentionally restricted; **this is not an image store or container image engine**.
+- Read-only inspection of a restricted tar/tar+gzip OCI layer subset: rejects path traversal, links, devices, whiteouts, extended metadata, duplicate paths, dangerous modes, oversized entries and decompression abuse. No extraction or filesystem writes.
 - Standard-library-only Go code, initial unit tests and Linux CI.
 
 The execution adapter is **not** yet independently security audited or exercised against real kernel isolation in this change. OCI runtimes remain required for execution; this is not a from-scratch kernel runtime. Validation reduces obvious hazards, but cannot certify an arbitrary OCI bundle as safe.
@@ -23,6 +26,18 @@ Requires Linux and Go 1.27 or later.
 go test ./...
 go build -o gcontainers ./cmd/gcontainers
 ./gcontainers doctor
+# Read-only SHA256 verification of all committed blobs in a private store:
+./gcontainers image audit --store /home/you/private-image-store
+# Cooperating imports enforce an aggregate 1-GiB committed-blob quota;
+# this is not a hard disk-space reservation or secure OCI extraction.
+./gcontainers image verify /path/to/oci-layout
+./gcontainers image inspect-layer /path/to/layer.tar tar
+# Offline exact descriptor digest + hostile-archive structural preflight:
+./gcontainers image verify-layer /absolute/local/layer.tar tar sha256:YOUR_VERIFIED_64_HEX_DIGEST
+# When the caller has an OCI layer descriptor, also provide its exact compressed bytes:
+./gcontainers image verify-layer /absolute/local/layer.tar tar sha256:YOUR_VERIFIED_64_HEX_DIGEST 10240
+# Optional experimental local blob import (opaque bytes only):
+./gcontainers image import --store /home/you/private-image-store --file /path/to/blob --experimental
 ./gcontainers validate /path/to/oci-bundle
 ```
 
