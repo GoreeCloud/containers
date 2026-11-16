@@ -42,6 +42,7 @@ go build -o gcontainers ./cmd/gcontainers
 ./gcontainers stack plan examples/native-stack.json
 # Offline, caller-supplied host budget; this is NOT a deployment authorization:
 ./gcontainers stack capacity examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16
+# Risk-impact reports remain advisory; no resources are reserved or deployed.
 # Read-only changes between two native declarations:
 ./gcontainers stack diff examples/native-stack.json examples/native-stack.json
 # Conservative dependency blast-radius and overlapping resource estimate:
@@ -55,6 +56,8 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 ./gcontainers oci create --id example --bundle /path/to/oci-bundle --experimental
 ./gcontainers oci start --id example --experimental
 ./gcontainers oci state --id example
+# Read-only pending-operation status (no patched OCI runtime required):
+./gcontainers oci pending --id example
 ./gcontainers oci stop --id example --experimental
 ./gcontainers oci delete --id example --experimental
 ```

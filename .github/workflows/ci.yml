@@ -39,6 +39,17 @@ jobs:
           grep -Fq '"verified": true' "$d/audit.json"
           grep -Fq '"blobCount": 1' "$d/audit.json"
           grep -Fq '"sourceProvenanceVerified": false' "$d/audit.json"
+          grep -Fq '"operatorReviewRequired": false' "$d/audit.json"
+          printf 'unresolved synthetic bytes
+' > "$d/store/tmp/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          if ./gcontainers image audit --store "$d/store" > "$d/audit-pending.json" 2>/dev/null; then
+            echo "Unresolved OCI import staging must be a failing audit" >&2
+            exit 1
+          fi
+          grep -Fq '"verified": false' "$d/audit-pending.json"
+          grep -Fq '"operatorReviewRequired": true' "$d/audit-pending.json"
+          test -f "$d/store/tmp/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          rm -- "$d/store/tmp/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           if ./gcontainers image audit --store "$d/missing-store" > "$d/missing.json" 2>/dev/null; then
             echo "Read-only audit must reject a missing store" >&2
             exit 1
@@ -57,6 +68,15 @@ jobs:
           ./gcontainers stack diff examples/native-stack.json examples/native-stack.json > "$d/diff.json"
           grep -Fq '"dryRun": true' "$d/diff.json"
           grep -Fq '"manualReviewRequired": false' "$d/diff.json"
+          ./gcontainers stack impact examples/native-stack.json examples/native-stack.json > "$d/impact.json"
+          grep -Fq '"dryRun": true' "$d/impact.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/impact.json"
+          grep -Fq '"rollbackVerified": false' "$d/impact.json"
+          mkdir -m 700 "$d/xdg" "$d/xdg/goreecloud-containers" "$d/xdg/goreecloud-containers/journal"
+          XDG_RUNTIME_DIR="$d/xdg" ./gcontainers oci pending --id example > "$d/pending.json"
+          grep -Fq '"pending": false' "$d/pending.json"
+          grep -Fq '"readOnly": true' "$d/pending.json"
+          grep -Fq '"recoveryRequired": false' "$d/pending.json"
           ./gcontainers stack capacity examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/capacity.json"
           grep -Fq '"withinLimits": true' "$d/capacity.json"
           grep -Fq '"deploymentAuthorized": false' "$d/capacity.json"

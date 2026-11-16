@@ -11,10 +11,10 @@ GoreeCloud Containers is the intended **first-priority container platform when i
 | Area | Verified in development | Stable gate status |
 | --- | --- | --- |
 | Go CLI, original code, bounded OCI policy | CI, tests, vet, build, selected fuzz tests | **Incomplete** — security review and OS acceptance missing |
-| OCI runtime security | Strict nonroot mapping/profile, patched version gate, minimal state parser and cooperative per-ID locks | **BLOCKED** — no actual rootless kernel confinement or recovery test |
-| OCI images | Bounded hash verification, private opaque blob store, read-only audit and tar/gzip preflight | **BLOCKED** — no authenticated registry, secure unpacker or signature verification |
+| OCI runtime security | Strict nonroot mapping/profile, patched version gate, minimal state parser, cooperative per-ID locks and private pending-operation journal | **BLOCKED** — no actual rootless kernel confinement or recovery test |
+| OCI images | Bounded hash verification, private opaque blob store, read-only audit (including unresolved import staging) and tar/gzip preflight | **BLOCKED** — no authenticated registry, secure unpacker or signature verification |
 | Host resources | Read-only cgroup/userns capability probe; caller-supplied stack capacity math | **BLOCKED** — actual cgroup delegation and enforcement not implemented |
-| Native stack | JSON validator, dependency stages, fingerprint, read-only transition diff and resource estimate | **BLOCKED** — executor, health checks and rollback not implemented |
+| Native stack | JSON validator, dependency stages, fingerprint, read-only transition diff, dependency blast-radius and resource risk estimates | **BLOCKED** — executor, health checks and rollback not implemented |
 | MIPS systems | Boundaries documented | **BLOCKED** — no implemented/proven platform integration |
 | VPS Mesh staging | No production action from this review branch | **BLOCKED** — isolated canary, service parity, observability and recovery required |
 
@@ -23,13 +23,13 @@ GoreeCloud Containers is the intended **first-priority container platform when i
 - [ ] Verified provenance of root-owned, patched low-level `crun`/`runc` binary; review upstream and distribution advisories again at test time. On the development laptop, the previously observed user-local `crun 1.31` is user-owned and not accepted; system `/usr/bin/crun 1.14.1` is below the current reviewed minimum.
 - [ ] Unprivileged UID/GID mapping, user/mount/pid/network/IPC/UTS namespaces, seccomp/LSM confinement, mount immutability and cgroup behavior proved using isolated real workloads and adversarial tests.
 - [ ] Eliminate execution-time bundle/rootfs path races through immutable snapshots or equivalent audited mechanisms. Current `os.Root` validation still hands a filesystem pathname to an external runtime.
-- [ ] Recover from crashes and leaked processes; prevent conflicting operations by other tooling, not just cooperating GoreeCloud CLI invocations. Per-ID file locks alone are insufficient.
+- [ ] Recover from crashes and leaked processes; prevent conflicting operations by other tooling, not just cooperating GoreeCloud CLI invocations. Per-ID locks and a fail-closed pending marker provide visibility but **not repair or correctness guarantees**; automatic recovery is not implemented.
 
 ### M2 — Image provenance, unpacking and storage
 
 - [ ] Registry authentication without exposed credentials, pinned manifests and signature/provenance controls reviewed by Wardveil and GoreeShield.
 - [ ] Separate safe extraction implementation with OCI whiteout and permissions semantics, link/path/device restrictions, quotas, rollback, and hostile archive tests.
-- [ ] Persistent content eviction and aggregate disk quota enforcement tested. A successful read-only audit verifies only the bytes observed during that audit, not content authenticity or future immutability.
+- [ ] Persistent content eviction and aggregate disk quota enforcement tested. A successful read-only audit verifies only the observed committed bytes; a pending import now forces a failing audit exit and operator review, not automatic deletion. It does not prove provenance, store immutability or real disk quotas.
 
 ### M3–M4 — Native operations before compatibility adapters
 
