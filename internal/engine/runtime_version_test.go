@@ -11,7 +11,8 @@ func TestRuntimeSecurityBaselines(t *testing.T) {
 		{"crun", "crun version 1.14.1\n", false},
 		{"crun", "crun version 1.29.1\n", false},
 		{"crun", "crun version 1.30.0\n", false},
-		{"crun", "crun version 1.30.1\ncommit: opaque\n", true},
+		{"crun", "crun version 1.30.1\ncommit: opaque\n", false},
+		{"crun", "crun version 1.31\n", true},
 		{"crun", "crun version 1.31.0\n", true},
 		{"runc", "runc version 1.5.2\n", false},
 		{"runc", "runc version 1.5.3\n", true},
@@ -24,7 +25,7 @@ func TestRuntimeSecurityBaselines(t *testing.T) {
 		{"crun", "unexpected output\n", false},
 		{"crun", "crun version 1.30.1+unverified\n", false},
 		{"crun", "crun version 1.30.1-rc1\n", false},
-		{"crun", "crun version 1.30.1\ncrun version 0.0.0\n", true},
+		{"crun", "crun version 1.31\ncrun version 0.0.0\n", true},
 	}
 	for _, tc := range cases {
 		err := CheckVersionOutput(tc.backend, tc.output)

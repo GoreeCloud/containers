@@ -16,7 +16,7 @@ import (
 func RuntimeSecurityBaseline(backend string) string {
 	switch backend {
 	case "crun":
-		return "1.30.1"
+		return "1.31.0"
 	case "runc":
 		return "1.5.3"
 	default:
@@ -37,6 +37,9 @@ func CheckVersionOutput(backend, output string) error {
 		return errors.New("unable to verify OCI runtime version")
 	}
 	value := strings.TrimPrefix(fields[2], "v")
+	if backend == "crun" && strings.Count(value, ".") == 1 {
+		value += ".0"
+	}
 	actual, err := versionTriple(value)
 	if err != nil {
 		return errors.New("OCI runtime version must be an unambiguous stable release")
