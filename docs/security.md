@@ -145,3 +145,7 @@ The native revision-check command requires the caller to supply the expected can
 ### Fail-closed OCI state reads
 
 The real adapter now acquires the per-container cooperative lock and checks the private pending journal BEFORE reading state from the external OCI runtime. An unresolved mutation causes a nonzero result instead of a misleading healthy status. Synthetic injected-runner tests verify that a pending intent blocks status reads and that a concurrent mutation lock delays status. This cannot attest to the state of processes manipulated directly by unrelated runtimes.
+
+### Hardened individual blob verification
+
+The private store Verify operation now rejects group/world-readable files, unexpected ownership, extra hardlinks, unsafe symlink paths, and changes in the opened file/path identity during verification. Bounded, cancellation-aware hashing detects content mismatch and unexpected growth. This closes deduplication checks that previously relied primarily on matching bytes; it remains a moment-in-time integrity check, not source authentication or resistance to hostile same-user modification.
