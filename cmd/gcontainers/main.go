@@ -75,6 +75,9 @@ func run(args []string, out io.Writer) error {
 		_, err = fmt.Fprintln(out, string(payload))
 		return err
 	case "stack":
+		if len(args) >= 4 && args[1] == "preflight" {
+			return stackPreflight(args[2:], out)
+		}
 		if len(args) >= 4 && args[1] == "revision-check" {
 			return stackRevisionCheck(args[2:], out)
 		}
@@ -160,6 +163,7 @@ Usage:
   gcontainers stack impact OLD_STACK_JSON NEW_STACK_JSON
   gcontainers stack transition-capacity OLD_STACK_JSON NEW_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
   gcontainers stack revision-check OLD_STACK_JSON NEW_STACK_JSON --expected-current-sha256 SHA256:HEX
+  gcontainers stack preflight OLD_STACK_JSON NEW_STACK_JSON --expected-current-sha256 sha256:HEX --cpu-milli N --memory-mib N --max-instances N
   gcontainers stack capacity NATIVE_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
   gcontainers validate BUNDLE_DIRECTORY
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental

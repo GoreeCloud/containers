@@ -61,3 +61,7 @@ The native transition-capacity command compares both old and target stack specif
 ## Offline stack revision conflict preflight
 
 The native revision-check command requires the caller to supply the expected canonical SHA-256 fingerprint of a prior stack declaration. It fails with a structured conflict report if the supplied source document does not match that fingerprint; both matched and mismatched cases explicitly report deploymentAuthorized=false, liveStateVerified=false and rollbackVerified=false. This detects stale **input documents**, not concurrent changes to running workloads. A future privileged/authorized controller must atomically compare its actual committed generation under its own lock before any rollout.
+
+### Single-source native preflight
+
+The read-only native stack preflight command parses the source and target declarations once and evaluates a prior canonical SHA-256 fingerprint, old/new resource overlap and downstream dependency impact on the same in-memory values. Stale source fingerprints or over-budget declarations fail with a structured report. Even when both input checks pass, the report has deploymentAuthorized=false, liveStateVerified=false and rollbackVerified=false. The CLI never contacts running workloads or modifies an application.
