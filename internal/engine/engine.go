@@ -125,6 +125,18 @@ func ValidateID(id string) error {
 }
 func (e *Engine) call(ctx context.Context, op string, args ...string) ([]byte, error) {
 	argv := append([]string{"--root", e.StateRoot, op}, args...)
+	if e.lockMutations && journalOp(op) {
+		if len(args) == 0 {
+			return nil, errors.New("OCI mutation container ID required")
+		}
+		id := args[0]
+		if op == "create" {
+			id = args[len(args)-1]
+		}
+		return RunJournaledMutation(ctx, e.StateRoot, id, op, func() ([]byte, error) {
+			return e.Runner.Run(ctx, e.Binary, argv...)
+		})
+	}
 	return e.Runner.Run(ctx, e.Binary, argv...)
 }
 func (e *Engine) Create(ctx context.Context, id, dir string) error {
@@ -223,6 +235,13 @@ func PrepareStateRoot(base string) (string, error) {
 		return "", err
 	}
 	if err := privateDir(locks); err != nil {
+		return "", err
+	}
+	journal := filepath.Join(state, "journal")
+	if err := os.Mkdir(journal, 0700); err != nil && !os.IsExist(err) {
+		return "", err
+	}
+	if err := privateDir(journal); err != nil {
 		return "", err
 	}
 	return state, nil
