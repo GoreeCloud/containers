@@ -40,6 +40,30 @@ jobs:
           grep -Fq '"blobCount": 1' "$d/audit.json"
           grep -Fq '"sourceProvenanceVerified": false' "$d/audit.json"
           grep -Fq '"operatorReviewRequired": false' "$d/audit.json"
+          ./gcontainers kernel-probe > "$d/kernel-probe.json"
+          grep -Fq '"rootlessCaller": true' "$d/kernel-probe.json"
+          grep -Fq '"ociIsolationVerified": false' "$d/kernel-probe.json"
+          grep -Fq '"seccompVerified": false' "$d/kernel-probe.json"
+          grep -Fq '"cgroupDelegationVerified": false' "$d/kernel-probe.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/kernel-probe.json"
+          tar --format=ustar -cf "$d/layer.tar" -C "$d" blob
+          layer_digest="sha256:$(sha256sum "$d/layer.tar" | cut -d' ' -f1)"
+          ./gcontainers image verify-layer "$d/layer.tar" tar "$layer_digest" > "$d/layer-verified.json"
+          grep -Fq '"digestMatches": true' "$d/layer-verified.json"
+          grep -Fq '"archiveSubsetValid": true' "$d/layer-verified.json"
+          grep -Fq '"sourceProvenanceVerified": false' "$d/layer-verified.json"
+          grep -Fq '"extractionAuthorized": false' "$d/layer-verified.json"
+          wrong_layer_digest="sha256:$(printf '%064d' 0)"
+          if ./gcontainers image verify-layer "$d/layer.tar" tar "$wrong_layer_digest" > "$d/layer-mismatch.json" 2>/dev/null; then
+            echo "Wrong OCI descriptor SHA256 accepted" >&2
+            exit 1
+          fi
+          printf '%s' 'invalid archive but hash-matching bytes' > "$d/bad-layer.tar"
+          malformed_digest="sha256:$(sha256sum "$d/bad-layer.tar" | cut -d' ' -f1)"
+          if ./gcontainers image verify-layer "$d/bad-layer.tar" tar "$malformed_digest" > "$d/layer-unsafe.json" 2>/dev/null; then
+            echo "Correct digest of invalid archive wrongly accepted" >&2
+            exit 1
+          fi
           for committed in "$d/store/blobs/sha256/"*; do
             chmod 0644 "$committed"
             if ./gcontainers image audit --store "$d/store" > "$d/public-blob.json" 2>/dev/null; then
@@ -113,6 +137,25 @@ jobs:
           grep -Fq '"goreeShieldReviewRequired": true' "$d/sensitive-preflight.json"
           grep -Fq '"wardveilReviewRequired": true' "$d/sensitive-preflight.json"
           grep -Fq '"mipsAuthorizationVerified": false' "$d/sensitive-preflight.json"
+          original_image="$(printf 'a%.0s' {1..64})"
+          different_image="$(printf 'c%.0s' {1..64})"
+          sed "s/sha256:$original_image/sha256:$different_image/" examples/native-stack.json > "$d/image-changed-stack.json"
+          ./gcontainers stack validate "$d/image-changed-stack.json"
+          if ./gcontainers stack preflight examples/native-stack.json "$d/image-changed-stack.json" --expected-current-sha256 "$source_sha" --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/image-change-preflight.json" 2>/dev/null; then
+            echo "Unreviewed OCI image digest change unexpectedly authorized" >&2
+            exit 1
+          fi
+          grep -Fq '"sourceAndBudgetChecksPassed": true' "$d/image-change-preflight.json"
+          grep -Fq '"sensitivePolicyReviewRequired": true' "$d/image-change-preflight.json"
+          grep -Fq '"imageReferenceChangeCount": 1' "$d/image-change-preflight.json"
+          grep -Fq '"imageProvenanceVerified": false' "$d/image-change-preflight.json"
+          grep -Fq '"wardveilReviewRequired": true' "$d/image-change-preflight.json"
+          grep -Fq '"goreeShieldReviewRequired": true' "$d/image-change-preflight.json"
+          grep -Fq '"goreeCloudIdentityReviewRequired": false' "$d/image-change-preflight.json"
+          if grep -Fq "$different_image" "$d/image-change-preflight.json"; then
+            echo "Image digest leaked in privacy-minimized preflight report" >&2
+            exit 1
+          fi
           if grep -Fq "synthetic-private-ref" "$d/sensitive-preflight.json"; then
             echo "Secret reference identifiers leaked into preflight report" >&2
             exit 1
