@@ -45,3 +45,7 @@ The development layer inspector parses a restricted tar or gzip-compressed tar s
 ## OCI layout descriptor-anchored verification
 
 The read-only verifier now opens the OCI layout through a directory handle (os.Root) and rejects symlinked layout roots, blob directories, metadata and blob entries. It checks opened file identity against the file it validated, and snapshots index/manifest bytes **while hashing those same bytes** rather than reopening a mutable manifest path. This reduces symlink and between-read TOCTOU exposures; it does **not** defeat bind mounts, concurrent mutation of an opened regular file by the same account, or supply-chain signature forgery. OCI verification is integrity checking, not malware scanning or permission to execute.
+
+## Bounded compressed-layer stream semantics
+
+OCI tar/gzip inspection now hard-limits compressed input with a reader that **errors** on overflow rather than silently truncating the source, and treats gzip as exactly one member. Trailing compressed bytes and concatenated gzip members are rejected after fully draining/verifying the decompressor checksum. These constraints deliberately reject some inputs that other OCI tools might accept; secure extraction, registry provenance and live image mounting remain unimplemented.

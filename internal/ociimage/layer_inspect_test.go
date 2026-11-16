@@ -145,3 +145,39 @@ func FuzzLayerTarInspection(f *testing.F) {
 		_, _ = InspectLayer(context.Background(), bytes.NewReader(data), MediaLayer)
 	})
 }
+
+func TestInspectLayerRejectsConcatenatedGzipMembers(t *testing.T) {
+	plain := makeLayer(t, layerEntry{name: "file.txt", size: 3, data: []byte("abc")})
+	var out bytes.Buffer
+	for i := 0; i < 2; i++ {
+		zipped := gzip.NewWriter(&out)
+		if _, err := zipped.Write(plain); err != nil {
+			t.Fatal(err)
+		}
+		if err := zipped.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := InspectLayer(context.Background(), bytes.NewReader(out.Bytes()), MediaLayerGzip); err == nil {
+		t.Fatal("concatenated gzip layer unexpectedly accepted")
+	}
+}
+func TestBoundedLayerReaderDoesNotMaskExtraCompressedBytes(t *testing.T) {
+	source := bytes.NewReader([]byte("12345"))
+	bounded := &boundedLayerReader{ctx: context.Background(), reader: source, max: 4}
+	b := make([]byte, 16)
+	if n, err := bounded.Read(b); n != 4 || err != nil {
+		t.Fatalf("unexpected first read: %d %v", n, err)
+	}
+	if _, err := bounded.Read(b); err == nil {
+		t.Fatal("oversize layer silently accepted")
+	}
+	// Exact-boundary EOF is legal, but must not be confused with extra bytes.
+	exact := &boundedLayerReader{ctx: context.Background(), reader: bytes.NewReader([]byte("1234")), max: 4}
+	if n, err := exact.Read(b); n != 4 || err != nil {
+		t.Fatalf("exact quota read: %d %v", n, err)
+	}
+	if n, err := exact.Read(b); n != 0 || err != io.EOF {
+		t.Fatalf("exact-boundary EOF rejected: %d %v", n, err)
+	}
+}
