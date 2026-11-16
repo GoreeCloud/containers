@@ -1,0 +1,28 @@
+name: Go preview checks
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - name: Format
+        run: test -z "$(gofmt -l cmd internal)"
+      - name: Test race and coverage
+        run: go test -race -cover ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./cmd/gcontainers
