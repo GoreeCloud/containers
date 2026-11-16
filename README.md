@@ -36,6 +36,8 @@ go build -o gcontainers ./cmd/gcontainers
 ./gcontainers stack impact examples/native-stack.json examples/native-stack.json
 # Pessimistic old+new overlap check, not a scheduler or deployment authorization:
 ./gcontainers stack transition-capacity examples/native-stack.json examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16
+# Verify the caller-supplied old declaration fingerprint, not live runtime state:
+./gcontainers stack revision-check examples/native-stack.json examples/native-stack.json --expected-current-sha256 sha256:REPLACE_WITH_CANONICAL_64_HEX_HASH
 ./gcontainers validate /path/to/oci-bundle
 ```
 

@@ -57,3 +57,7 @@ The read-only stack impact command compares two validated native specifications 
 ## Explicit native transition overlap budget preflight
 
 The native transition-capacity command compares both old and target stack specifications with caller-supplied CPU, memory and maximum instance budgets. It conservatively assumes the two deployments may coexist if any service changes, returns nonzero on exceeded declared limits, and never marks deployment authorized or rollback verified. Even a no-op must fit its existing declared budget. **These are not live host reservations, health checks, staging admission, resource enforcement or rollback guarantees**; all changes still require operator review.
+
+## Offline stack revision conflict preflight
+
+The native revision-check command requires the caller to supply the expected canonical SHA-256 fingerprint of a prior stack declaration. It fails with a structured conflict report if the supplied source document does not match that fingerprint; both matched and mismatched cases explicitly report deploymentAuthorized=false, liveStateVerified=false and rollbackVerified=false. This detects stale **input documents**, not concurrent changes to running workloads. A future privileged/authorized controller must atomically compare its actual committed generation under its own lock before any rollout.
