@@ -65,3 +65,7 @@ The native revision-check command requires the caller to supply the expected can
 ### Single-source native preflight
 
 The read-only native stack preflight command parses the source and target declarations once and evaluates a prior canonical SHA-256 fingerprint, old/new resource overlap and downstream dependency impact on the same in-memory values. Stale source fingerprints or over-budget declarations fail with a structured report. Even when both input checks pass, the report has deploymentAuthorized=false, liveStateVerified=false and rollbackVerified=false. The CLI never contacts running workloads or modifies an application.
+
+### MIPS-sensitive secret-reference change gate
+
+The source-only native preflight counts (but does not name or resolve) services whose secret references are introduced, removed or changed. It separately flags GoreeCloud Identity (authorization), GoreeShield (privacy and consent), and Wardveil (cybersecurity policy) for review; it explicitly reports MIPS authorization as unverified and exits unsuccessfully for sensitive changes. This is an offline safety gate, not an implemented policy provider, grant mechanism or proof of approved deployment.
