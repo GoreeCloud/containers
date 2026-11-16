@@ -101,6 +101,22 @@ jobs:
             exit 1
           fi
           grep -Fq '"sourceAndBudgetChecksPassed": false' "$d/preflight-budget.json"
+          awk '/"resources":/ && !added {print "      \"secretRefs\": [\"synthetic-private-ref\"],"; added=1} {print}' examples/native-stack.json > "$d/sensitive-stack.json"
+          ./gcontainers stack validate "$d/sensitive-stack.json"
+          if ./gcontainers stack preflight examples/native-stack.json "$d/sensitive-stack.json" --expected-current-sha256 "$source_sha" --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/sensitive-preflight.json" 2>/dev/null; then
+            echo "Unreviewed GoreeCloud Identity/GoreeShield/Wardveil secret reference change was accepted" >&2
+            exit 1
+          fi
+          grep -Fq '"sourceAndBudgetChecksPassed": true' "$d/sensitive-preflight.json"
+          grep -Fq '"sensitivePolicyReviewRequired": true' "$d/sensitive-preflight.json"
+          grep -Fq '"goreeCloudIdentityReviewRequired": true' "$d/sensitive-preflight.json"
+          grep -Fq '"goreeShieldReviewRequired": true' "$d/sensitive-preflight.json"
+          grep -Fq '"wardveilReviewRequired": true' "$d/sensitive-preflight.json"
+          grep -Fq '"mipsAuthorizationVerified": false' "$d/sensitive-preflight.json"
+          if grep -Fq "synthetic-private-ref" "$d/sensitive-preflight.json"; then
+            echo "Secret reference identifiers leaked into preflight report" >&2
+            exit 1
+          fi
           ./gcontainers stack diff examples/native-stack.json examples/native-stack.json > "$d/diff.json"
           grep -Fq '"dryRun": true' "$d/diff.json"
           grep -Fq '"manualReviewRequired": false' "$d/diff.json"

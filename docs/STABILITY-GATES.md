@@ -11,11 +11,11 @@ GoreeCloud Containers is the intended **first-priority container platform when i
 | Area | Verified in development | Stable gate status |
 | --- | --- | --- |
 | Go CLI, original code, bounded OCI policy | CI, tests, vet, build, selected fuzz tests | **Incomplete** — security review and OS acceptance missing |
-| OCI runtime security | Strict nonroot mapping/profile, patched version gate, minimal state parser, cooperative per-ID locks, private pending-operation journal with double-read incident consistency and fail-closed status reads | **BLOCKED** — no actual rootless kernel confinement or recovery test |
-| OCI images | Bounded hash verification, private opaque blob store, read-only audit (including unresolved import staging and unsafe ownership/permissions), private SHA-256 Verify, cooperating 1-GiB committed-blob write quota, cross-process lock test and tar/gzip preflight | **BLOCKED** — no authenticated registry, secure unpacker or signature verification |
+| OCI runtime security | Strict nonroot mapping/profile, patched version gate, minimal state parser, cooperative per-ID locks, private pending-operation journal with double-read incident consistency, fail-closed status reads and post-flock pathname identity recheck | **BLOCKED** — no actual rootless kernel confinement or recovery test |
+| OCI images | Bounded hash verification, private opaque blob store, read-only audit (including unresolved import staging and unsafe ownership/permissions and post-hash path identity recheck), private SHA-256 Verify, cooperating 1-GiB committed-blob write quota, cross-process lock test and tar/gzip preflight | **BLOCKED** — no authenticated registry, secure unpacker or signature verification |
 | Host resources | Read-only cgroup/userns capability probe; caller-supplied stack capacity math | **BLOCKED** — actual cgroup delegation and enforcement not implemented |
-| Native stack | JSON validator, dependency stages, fingerprint, read-only transition diff, dependency blast-radius, explicit old-plus-new budget, caller-supplied revision conflict checks and combined single-source preflight | **BLOCKED** — executor, health checks and rollback not implemented |
-| MIPS systems | Boundaries documented | **BLOCKED** — no implemented/proven platform integration |
+| Native stack | JSON validator, dependency stages, fingerprint, read-only transition diff, dependency blast-radius, explicit old-plus-new budget, caller-supplied revision conflict checks, combined single-source preflight and redacted fail-closed secret-reference change review | **BLOCKED** — executor, health checks and rollback not implemented |
+| MIPS systems | Boundaries documented; offline sensitive secret-change flags for Identity, GoreeShield and Wardveil without granting approvals | **BLOCKED** — no implemented/proven platform integration |
 | VPS Mesh staging | No production action from this review branch | **BLOCKED** — isolated canary, service parity, observability and recovery required |
 
 ### M1 — Runtime security gate
@@ -35,6 +35,7 @@ GoreeCloud Containers is the intended **first-priority container platform when i
 
 - [ ] Real rootless network isolation, default-deny service connectivity, private named volumes, cgroup CPU/memory/PID enforcement and restart/recovery testing.
 - [ ] Native stack apply, health/readiness ordering, secrets via GoreeCloud Identity and GoreeShield, deployment locks, transactional updates and rollback.
+- [ ] Any future secret-reference edit must have a real authenticated GoreeCloud Identity grant, applicable GoreeShield privacy approval and Wardveil cyber policy acceptance; a redacted source-only flag is **not** MIPS enforcement or authorization.
 - [ ] A future native executor must independently compare the authenticated **running** stack generation under its own exclusive lock; an offline source declaration fingerprint match is not live reconciliation or deployment consent.
 - [ ] Optional Docker/Compose/Podman import and compatibility adapters after native core stability; no external engine must be required for native operations.
 
