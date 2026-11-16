@@ -163,3 +163,7 @@ The private per-container cooperative lock now checks its pathname inode, owner 
 ### Post-hash blob identity revalidation
 
 The read-only full-store integrity audit now rechecks every committed blob's opened-file and pathname identities, size, owner, private mode and link count after hashing but before accepting its digest. Synthetic tests prove detection of same-size pathname replacement and permission changes during an inspection. This is a bounded observational check, not an immutable filesystem snapshot, cryptographic source signature or malicious same-user write defense.
+
+### MIPS-sensitive secret-reference change gate
+
+The source-only native preflight counts (but does not name or resolve) services whose secret references are introduced, removed or changed. It separately flags GoreeCloud Identity (authorization), GoreeShield (privacy and consent), and Wardveil (cybersecurity policy) for review; it explicitly reports MIPS authorization as unverified and exits unsuccessfully for sensitive changes. This is an offline safety gate, not an implemented policy provider, grant mechanism or proof of approved deployment.

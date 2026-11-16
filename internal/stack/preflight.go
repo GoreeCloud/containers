@@ -8,16 +8,22 @@ import (
 // parsed old/new declarations. It does not inspect actual deployed workloads
 // and never authorizes their creation, update or removal.
 type PreflightReport struct {
-	DryRun                      bool                     `json:"dryRun"`
-	SourceAndBudgetChecksPassed bool                     `json:"sourceAndBudgetChecksPassed"`
-	DeploymentAuthorized        bool                     `json:"deploymentAuthorized"`
-	LiveStateVerified           bool                     `json:"liveStateVerified"`
-	RollbackVerified            bool                     `json:"rollbackVerified"`
-	ManualReviewRequired        bool                     `json:"manualReviewRequired"`
-	Revision                    RevisionReview           `json:"revision"`
-	Capacity                    TransitionCapacityReview `json:"capacity"`
-	Impact                      ImpactReport             `json:"impact"`
-	Blockers                    []string                 `json:"blockers"`
+	DryRun                           bool                     `json:"dryRun"`
+	SourceAndBudgetChecksPassed      bool                     `json:"sourceAndBudgetChecksPassed"`
+	DeploymentAuthorized             bool                     `json:"deploymentAuthorized"`
+	LiveStateVerified                bool                     `json:"liveStateVerified"`
+	RollbackVerified                 bool                     `json:"rollbackVerified"`
+	ManualReviewRequired             bool                     `json:"manualReviewRequired"`
+	SensitivePolicyReviewRequired    bool                     `json:"sensitivePolicyReviewRequired"`
+	SecretReferenceChangeCount       int                      `json:"secretReferenceChangeCount"`
+	GoreeCloudIdentityReviewRequired bool                     `json:"goreeCloudIdentityReviewRequired"`
+	GoreeShieldReviewRequired        bool                     `json:"goreeShieldReviewRequired"`
+	WardveilReviewRequired           bool                     `json:"wardveilReviewRequired"`
+	MIPSAuthorizationVerified        bool                     `json:"mipsAuthorizationVerified"`
+	Revision                         RevisionReview           `json:"revision"`
+	Capacity                         TransitionCapacityReview `json:"capacity"`
+	Impact                           ImpactReport             `json:"impact"`
+	Blockers                         []string                 `json:"blockers"`
 }
 
 // ReviewPreflight reads each document as a stable in-memory value, then
@@ -53,5 +59,60 @@ func ReviewPreflight(before, after Spec, expected string, budget ResourceBudget)
 		result.Blockers = append(result.Blockers, "expected source revision does not match prior declaration")
 	}
 	result.Blockers = append(result.Blockers, capacity.Blockers...)
+	// Names of external secrets are never read from a provider.
+	// Do not resolve, log or expose any reference identifiers here.
+	secretChanges := countChangedSecretReferenceServices(before, after)
+	result.SecretReferenceChangeCount = secretChanges
+	if secretChanges > 0 {
+		result.SensitivePolicyReviewRequired = true
+		result.GoreeCloudIdentityReviewRequired = true
+		result.GoreeShieldReviewRequired = true
+		result.WardveilReviewRequired = true
+		result.ManualReviewRequired = true
+		result.Blockers = append(result.Blockers, "secret reference changes require GoreeCloud Identity, GoreeShield and Wardveil review")
+	}
+	result.MIPSAuthorizationVerified = false
 	return result, nil
+}
+
+// countChangedSecretReferenceServices counts affected service names without
+// revealing any actual secret reference identifiers in the report.
+func countChangedSecretReferenceServices(before, after Spec) int {
+	current := make(map[string][]string, len(before.Services))
+	target := make(map[string][]string, len(after.Services))
+	for _, service := range before.Services {
+		current[service.Name] = service.SecretRefs
+	}
+	for _, service := range after.Services {
+		target[service.Name] = service.SecretRefs
+	}
+	seen := map[string]bool{}
+	changed := 0
+	for name, oldRefs := range current {
+		seen[name] = true
+		if !sameSecretReferences(oldRefs, target[name]) {
+			changed++
+		}
+	}
+	for name, newRefs := range target {
+		if !seen[name] && len(newRefs) > 0 {
+			changed++
+		}
+	}
+	return changed
+}
+func sameSecretReferences(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	seen := make(map[string]bool, len(left))
+	for _, name := range left {
+		seen[name] = true
+	}
+	for _, name := range right {
+		if !seen[name] {
+			return false
+		}
+	}
+	return true
 }
