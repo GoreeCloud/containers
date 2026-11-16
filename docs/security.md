@@ -47,3 +47,7 @@ The low-level runtime adapter now places its child invocation in an isolated pro
 ## Fail-closed OCI lifecycle state handling
 
 Read-only OCI state responses now require a matching strict container ID, an accepted stable state, valid running PID, bounded output, and duplicate-key-safe JSON. Returned state is minimized to ID/status/PID; upstream annotations and bundle paths are never echoed. Start is allowed only from created, stop only from running, and non-force delete only from created/stopped. These checks reduce accidental transitions and privacy leakage; **they do not prevent state changes racing between read and execution, do not implement durable lock arbitration or reconciliation, and are not production state-management acceptance**.
+
+## OCI bundle descriptor anchoring
+
+Bundle policy parsing now opens an OCI bundle through an os.Root directory handle, rejects a symlinked bundle path, symlinked config entries and symlinks in the declared rootfs directory path. It cross-checks opened config file identity and reads bounded JSON from that same descriptor. **The external OCI runtime still independently reopens paths after validation**; this is a preview TOCTOU reduction, not immutable snapshotting or authorization for untrusted bundle execution. Test rootfs content, file mutation after checks, LSM confinement and failure recovery before runtime acceptance.
