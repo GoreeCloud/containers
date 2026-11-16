@@ -2,6 +2,7 @@ package ociimage
 
 import (
 	"archive/tar"
+	"bufio"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -38,13 +39,19 @@ func InspectLayer(ctx context.Context, input io.Reader, mediaType string) (Layer
 	if mediaType != MediaLayer && mediaType != MediaLayerGzip {
 		return empty, errors.New("unsupported OCI layer compression or media type")
 	}
-	source := &layerContextReader{ctx: ctx, reader: io.LimitReader(input, MaxLayerCompressedBytes+1)}
+	source := &boundedLayerReader{ctx: ctx, reader: input, max: MaxLayerCompressedBytes}
 	var decoded io.Reader = source
+	var compressedRemainder *bufio.Reader
 	if mediaType == MediaLayerGzip {
-		decoder, err := gzip.NewReader(source)
+		// gzip.NewReader consumes buffered bytes internally unless given an
+		// io.ByteReader. Keep the remaining bytes observable after the first
+		// gzip member, and explicitly prohibit concatenated gzip streams.
+		compressedRemainder = bufio.NewReaderSize(source, 4096)
+		decoder, err := gzip.NewReader(compressedRemainder)
 		if err != nil {
 			return empty, errors.New("invalid gzip layer header")
 		}
+		decoder.Multistream(false)
 		defer decoder.Close()
 		decoded = decoder
 	}
@@ -145,6 +152,16 @@ func InspectLayer(ctx context.Context, input io.Reader, mediaType string) (Layer
 			return empty, fmt.Errorf("OCI trailer verification failed: %w", err)
 		}
 	}
+	if compressedRemainder != nil {
+		// gzip trailer and CRC have been verified by the full decoded drain.
+		// Any additional compressed bytes (including a second gzip member)
+		// make the intended OCI layer ambiguous and are rejected.
+		var sentinel [1]byte
+		n, err := compressedRemainder.Read(sentinel[:])
+		if n > 0 || err != io.EOF {
+			return empty, errors.New("trailing gzip members or compressed data unsupported")
+		}
+	}
 	return report, nil
 }
 func validLayerName(name string) bool {
@@ -180,6 +197,58 @@ func (r *layerContextReader) Read(p []byte) (int, error) {
 		}
 	} else {
 		r.emptyReads = 0
+	}
+	return n, err
+}
+
+// boundedLayerReader fails closed when the compressed input exceeds its
+// quota, rather than silently reporting EOF from an io.LimitReader.
+// Read() explicitly probes for an extra source byte at the boundary.
+type boundedLayerReader struct {
+	ctx    context.Context
+	reader io.Reader
+	max    int64
+	size   int64
+	idle   int
+}
+
+func (r *boundedLayerReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if r.size >= r.max {
+		var sentinel [1]byte
+		n, err := r.reader.Read(sentinel[:])
+		if n > 0 {
+			return 0, errors.New("compressed OCI layer input quota exceeded")
+		}
+		if err != nil {
+			return 0, err
+		}
+		r.idle++
+		if r.idle > 100 {
+			return 0, io.ErrNoProgress
+		}
+		return 0, nil
+	}
+	if int64(len(p)) > r.max-r.size {
+		p = p[:int(r.max-r.size)]
+	}
+	n, err := r.reader.Read(p)
+	if n < 0 || n > len(p) {
+		return 0, errors.New("invalid OCI layer reader count")
+	}
+	r.size += int64(n)
+	if n == 0 && err == nil {
+		r.idle++
+		if r.idle > 100 {
+			return 0, io.ErrNoProgress
+		}
+	} else {
+		r.idle = 0
 	}
 	return n, err
 }

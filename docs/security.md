@@ -87,3 +87,7 @@ The native stack capacity command accepts **caller-provided** CPU millicore, mem
 ## OCI bundle descriptor anchoring
 
 Bundle policy parsing now opens an OCI bundle through an os.Root directory handle, rejects a symlinked bundle path, symlinked config entries and symlinks in the declared rootfs directory path. It cross-checks opened config file identity and reads bounded JSON from that same descriptor. **The external OCI runtime still independently reopens paths after validation**; this is a preview TOCTOU reduction, not immutable snapshotting or authorization for untrusted bundle execution. Test rootfs content, file mutation after checks, LSM confinement and failure recovery before runtime acceptance.
+
+## Bounded compressed-layer stream semantics
+
+OCI tar/gzip inspection now hard-limits compressed input with a reader that **errors** on overflow rather than silently truncating the source, and treats gzip as exactly one member. Trailing compressed bytes and concatenated gzip members are rejected after fully draining/verifying the decompressor checksum. These constraints deliberately reject some inputs that other OCI tools might accept; secure extraction, registry provenance and live image mounting remain unimplemented.
