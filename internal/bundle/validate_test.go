@@ -110,3 +110,14 @@ func TestPreviewMountAndSeccompRestrictions(t *testing.T) {
 		}
 	}
 }
+
+func FuzzBundleStrictJSON(f *testing.F) {
+	f.Add([]byte(safeSpec))
+	f.Add([]byte("{\"a\":1,\"a\":2}"))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		if len(b) > 8192 {
+			t.Skip()
+		}
+		_ = rejectDuplicateKeys(b)
+	})
+}
