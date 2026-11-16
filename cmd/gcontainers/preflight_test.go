@@ -31,8 +31,14 @@ func TestCombinedPreflightCLIStaleAndOvercommit(t *testing.T) {
 	args := []string{"stack", "preflight", old, target, "--expected-current-sha256", plan.SpecSHA256,
 		"--cpu-milli", "2000", "--memory-mib", "256", "--max-instances", "8"}
 	var out bytes.Buffer
-	if err := run(args, &out); err != nil {
-		t.Fatal(err)
+	// Source and budget may pass, but a changed service still requires
+	// real authenticated Identity approval from a future native executor.
+	if err := run(args, &out); err == nil {
+		t.Fatal("changed native stack accepted without Identity grant")
+	}
+	if !strings.Contains(out.String(), `"goreeCloudIdentityReviewRequired": true`) ||
+		!strings.Contains(out.String(), `"mipsAuthorizationVerified": false`) {
+		t.Fatalf("operator approval gate omitted: %s", out.String())
 	}
 	if !strings.Contains(out.String(), `"sourceAndBudgetChecksPassed": true`) ||
 		!strings.Contains(out.String(), `"deploymentAuthorized": false`) ||

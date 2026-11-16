@@ -185,3 +185,7 @@ The combined native preflight masks image-digest identifiers in its embedded tra
 The kernel probe now executes its own already-running executable through the Linux /proc/self/exe inode instead of reopening a replaceable user-writable executable pathname. The inert child receives the parent namespace IDs on a bounded stdin pipe and returns only booleans; even the internal helper no longer prints raw namespace inode identities. This is a reduction in probe tampering and diagnostic disclosure risk, not OCI confinement.
 
 An optional positive DESCRIPTOR_BYTES CLI argument now requires the caller-supplied OCI compressed byte size to match both the open file and exactly the bytes hashed during inspection. The response separates digest-only checks from both descriptor-size and digest checks. The descriptor and publisher remain unauthenticated and extraction is always denied.
+
+### Operator grant is a required native transition gate
+
+Even a source-valid, in-budget change to replicas, dependencies or other nonsecret application fields now fails the offline native preflight until a future GoreeCloud Identity operator authorization exists. The source-only tool reports goreeCloudIdentityReviewRequired=true and mipsAuthorizationVerified=false; it never grants, fetches or assumes an Identity token. A no-op input may pass offline checks but still cannot authorize a deployment.

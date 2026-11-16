@@ -31,7 +31,7 @@ func TestImageReferenceChangeRequiresWardveilAndGoreeShieldReview(t *testing.T) 
 	if !r.SourceAndBudgetChecksPassed || r.ImageReferenceChangeCount != 1 ||
 		r.ImageProvenanceVerified || !r.SensitivePolicyReviewRequired ||
 		!r.GoreeShieldReviewRequired || !r.WardveilReviewRequired ||
-		r.GoreeCloudIdentityReviewRequired || r.MIPSAuthorizationVerified ||
+		!r.GoreeCloudIdentityReviewRequired || r.MIPSAuthorizationVerified ||
 		r.DeploymentAuthorized || !r.ManualReviewRequired {
 		t.Fatalf("image provenance change incorrectly approved: %+v", r)
 	}

@@ -48,7 +48,8 @@ func stackPreflight(args []string, out io.Writer) error {
 	if _, err = fmt.Fprintln(out, string(encoded)); err != nil {
 		return err
 	}
-	if !report.SourceAndBudgetChecksPassed || report.SensitivePolicyReviewRequired {
+	if !report.SourceAndBudgetChecksPassed || report.SensitivePolicyReviewRequired ||
+		report.GoreeCloudIdentityReviewRequired {
 		return errors.New("native preflight source, budget or MIPS sensitive-policy review unresolved")
 	}
 	return nil
