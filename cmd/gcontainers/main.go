@@ -17,8 +17,8 @@ import (
 
 	"github.com/GoreeCloud/containers/internal/bundle"
 	"github.com/GoreeCloud/containers/internal/engine"
+	"github.com/GoreeCloud/containers/internal/hostreadiness"
 	"github.com/GoreeCloud/containers/internal/ociimage"
-
 	"github.com/GoreeCloud/containers/internal/stack"
 )
 
@@ -58,7 +58,25 @@ func run(args []string, out io.Writer) error {
 		return oci(args[1:], out)
 	case "image":
 		return imageCommand(args[1:], out)
-
+	case "host":
+		if len(args) != 2 || args[1] != "inspect" {
+			return errors.New("usage: gcontainers host inspect")
+		}
+		if runtime.GOOS != "linux" {
+			return errors.New("host readiness inspection supports Linux only")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		report, err := hostreadiness.Inspect(ctx, os.DirFS("/"), os.Geteuid() != 0)
+		if err != nil {
+			return err
+		}
+		payload, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(out, string(payload))
+		return err
 	case "stack":
 		if len(args) >= 3 && args[1] == "capacity" {
 			return stackCapacity(args[2:], out)
@@ -115,8 +133,8 @@ Usage:
   gcontainers image verify OCI_LAYOUT_DIR
   gcontainers image inspect-layer TAR_FILE tar|tar+gzip
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
-
-gcontainers stack validate NATIVE_STACK_JSON
+gcontainers host inspect
+  gcontainers stack validate NATIVE_STACK_JSON
   gcontainers stack plan NATIVE_STACK_JSON
   gcontainers stack diff OLD_STACK_JSON NEW_STACK_JSON
   gcontainers stack capacity NATIVE_STACK_JSON --cpu-milli N --memory-mib N --max-instances N

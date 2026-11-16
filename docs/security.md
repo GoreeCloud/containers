@@ -91,3 +91,7 @@ Bundle policy parsing now opens an OCI bundle through an os.Root directory handl
 ## Bounded compressed-layer stream semantics
 
 OCI tar/gzip inspection now hard-limits compressed input with a reader that **errors** on overflow rather than silently truncating the source, and treats gzip as exactly one member. Trailing compressed bytes and concatenated gzip members are rejected after fully draining/verifying the decompressor checksum. These constraints deliberately reject some inputs that other OCI tools might accept; secure extraction, registry provenance and live image mounting remain unimplemented.
+
+## Linux rootless host capability observation
+
+The optional host inspect command reads only fixed, size-bounded Linux proc/sysfs capability files to report the presence of cgroup v2 cpu/memory/pids controllers and unprivileged user-namespace configuration. It does not reveal usernames, paths, container names or secret data. It never invokes unshare, writes cgroup files, modifies services, verifies per-user cgroup delegation or proves namespace isolation. All reports explicitly retain deploymentAuthorized=false, delegationVerified=false and isolationVerified=false, even when every observed kernel fact appears favorable. VPS Mesh readiness must be verified separately on an authorized staging target.

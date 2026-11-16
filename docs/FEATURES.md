@@ -9,6 +9,7 @@
 | Private local SHA-256 blob storage/import | Development | M2 preview; bounded, atomically linked opaque blobs, no extraction/pull or production store acceptance |
 | Read-only bounded tar/gzip layer safety preflight | Development | M2 preview; fail closed on links, traversal, device nodes and unsupported formats; no extraction |
 | Full OCI image store, layer unpack and registry support | Planned | M2: no production image pull/build |
+| Read-only Linux cgroup/userns prerequisites inspection | Development | Fixed allowlist of proc/sysfs facts; never verifies delegation or permits deployment |
 | Rootless network, volumes and cgroups | Planned | M3 |
 | Native GoreeCloud stack JSON validator, canonical digest, parallel-stage and side-effect-free transition/diff planner, plus explicit host capacity budget review | Development | M4 preview; checks immutable image digests and restrictions; no workloads launched |
 | Native stack executor and deployment reconciliation | Planned | M4; not merely a Docker Compose wrapper |

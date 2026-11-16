@@ -33,6 +33,8 @@ go build -o gcontainers ./cmd/gcontainers
 ./gcontainers image inspect-layer /path/to/layer.tar tar
 # Optional experimental local blob import (opaque bytes only):
 ./gcontainers image import --store /home/you/private-image-store --file /path/to/blob --experimental
+# Read-only, non-identifying Linux kernel capabilities (not a security attestation):
+./gcontainers host inspect
 ./gcontainers stack validate examples/native-stack.json
 ./gcontainers stack plan examples/native-stack.json
 # Offline, caller-supplied host budget; this is NOT a deployment authorization:
