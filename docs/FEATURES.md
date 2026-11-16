@@ -8,7 +8,7 @@
 | Rootless image store and OCI registry support | Planned | M2: no production image pull/build |
 | Read-only Linux cgroup/userns prerequisites inspection | Development | Fixed allowlist of proc/sysfs facts; never verifies delegation or permits deployment |
 | Rootless network, volumes and cgroups | Planned | M3 |
-| Native GoreeCloud stack JSON validator, canonical digest, parallel-stage and side-effect-free transition/diff planner, plus explicit host capacity budget review | Development | M4 preview; checks immutable image digests and restrictions; no workloads launched |
+| Native GoreeCloud stack JSON validator, canonical digest, parallel-stage and side-effect-free transition/diff and dependency-impact risk planner, plus explicit host capacity budget review | Development | M4 preview; checks immutable image digests and restrictions; no workloads launched |
 | Native stack executor and deployment reconciliation | Planned | M4; not merely a Docker Compose wrapper |
 | Optional Docker Compose import/compatibility | Planned | M4, second priority to native stack |
 | Optional Podman compatibility | Planned | M4, second priority |

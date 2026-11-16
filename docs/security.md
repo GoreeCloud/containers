@@ -49,3 +49,7 @@ The optional host inspect command reads only fixed, size-bounded Linux proc/sysf
 ## Immutable-in-memory native stack-file reads
 
 The stack declaration loader now resolves an absolute local file parent, rejects symlinked parent directories and symlinked declaration files, opens via an os.Root directory descriptor, compares the opened inode to the checked file and requires exact bounded content length. The parsed document is a single in-memory snapshot; **this is not a signed policy decision or protection against a malicious same-user process modifying the opened inode concurrently**. Deployment remains unimplemented.
+
+## Dependency-aware native stack risk impact
+
+The read-only stack impact command compares two validated native specifications and tracks transitive dependents of changed services across both original and target dependency graphs. It computes a conservative **old-plus-new** potential overlapping CPU/memory envelope for change scenarios. This is a theoretical upper bound, not observed host capacity, actual coexistence scheduling, or a transactional rollback plan. Every changed scenario remains deploymentAuthorized=false, rollbackVerified=false and manualReviewRequired=true. It never deploys, stops or restarts a service.

@@ -75,6 +75,26 @@ func run(args []string, out io.Writer) error {
 		_, err = fmt.Fprintln(out, string(payload))
 		return err
 	case "stack":
+		if len(args) == 4 && args[1] == "impact" {
+			old, err := stack.Load(args[2])
+			if err != nil {
+				return err
+			}
+			target, err := stack.Load(args[3])
+			if err != nil {
+				return err
+			}
+			report, err := stack.AnalyzeImpact(old, target)
+			if err != nil {
+				return err
+			}
+			encoded, err := json.MarshalIndent(report, "", "  ")
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(out, string(encoded))
+			return err
+		}
 		if len(args) >= 3 && args[1] == "capacity" {
 			return stackCapacity(args[2:], out)
 		}
@@ -131,6 +151,7 @@ Usage:
   gcontainers stack validate NATIVE_STACK_JSON
   gcontainers stack plan NATIVE_STACK_JSON
   gcontainers stack diff OLD_STACK_JSON NEW_STACK_JSON
+  gcontainers stack impact OLD_STACK_JSON NEW_STACK_JSON
   gcontainers stack capacity NATIVE_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
   gcontainers validate BUNDLE_DIRECTORY
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
