@@ -194,20 +194,31 @@ Options for OCI commands: --runtime=crun|runc
 No image pull/unpack, native stack execution, networking, Compose or production deployment is implemented yet.`)
 	return err
 }
+
+// runtimeAdmissionStatus is a read-only explanation of preview admission.
+// It must never be used as proof of production safety or replace per-operation
+// executable and version checks. Avoid exposing host filesystem paths.
+func runtimeAdmissionStatus(ctx context.Context, binary string, lookupErr error) (bool, string) {
+	if lookupErr != nil {
+		return false, "not_installed"
+	}
+	if err := engine.TrustedRuntimeBinary(binary); err != nil {
+		return false, "untrusted_executable"
+	}
+	if err := engine.CheckInstalledRuntime(ctx, binary); err != nil {
+		return false, "runtime_version_or_probe_rejected"
+	}
+	return true, "preview_preflight_passed"
+}
+
 func doctor(w io.Writer) error {
 	uid := os.Geteuid()
 	crunPath, crunErr := exec.LookPath("crun")
 	runcPath, runcErr := exec.LookPath("runc")
-	crunEligible := false
-	runcEligible := false
 	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer cancel()
-	if crunErr == nil && engine.CheckInstalledRuntime(ctx, crunPath) == nil {
-		crunEligible = true
-	}
-	if runcErr == nil && engine.CheckInstalledRuntime(ctx, runcPath) == nil {
-		runcEligible = true
-	}
+	crunEligible, crunStatus := runtimeAdmissionStatus(ctx, crunPath, crunErr)
+	runcEligible, runcStatus := runtimeAdmissionStatus(ctx, runcPath, runcErr)
 	_, cgErr := os.Stat("/sys/fs/cgroup/cgroup.controllers")
 	info := map[string]any{
 		"product":                    "GoreeCloud Containers",
@@ -220,6 +231,8 @@ func doctor(w io.Writer) error {
 		"runc_present":               runcErr == nil,
 		"crun_security_baseline_met": crunEligible,
 		"runc_security_baseline_met": runcEligible,
+		"crun_admission_status":      crunStatus,
+		"runc_admission_status":      runcStatus,
 		"xdg_runtime_dir_set":        os.Getenv("XDG_RUNTIME_DIR") != "",
 		"production_ready":           false,
 	}
