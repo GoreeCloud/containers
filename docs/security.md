@@ -53,3 +53,7 @@ The stack declaration loader now resolves an absolute local file parent, rejects
 ## Dependency-aware native stack risk impact
 
 The read-only stack impact command compares two validated native specifications and tracks transitive dependents of changed services across both original and target dependency graphs. It computes a conservative **old-plus-new** potential overlapping CPU/memory envelope for change scenarios. This is a theoretical upper bound, not observed host capacity, actual coexistence scheduling, or a transactional rollback plan. Every changed scenario remains deploymentAuthorized=false, rollbackVerified=false and manualReviewRequired=true. It never deploys, stops or restarts a service.
+
+## Explicit native transition overlap budget preflight
+
+The native transition-capacity command compares both old and target stack specifications with caller-supplied CPU, memory and maximum instance budgets. It conservatively assumes the two deployments may coexist if any service changes, returns nonzero on exceeded declared limits, and never marks deployment authorized or rollback verified. Even a no-op must fit its existing declared budget. **These are not live host reservations, health checks, staging admission, resource enforcement or rollback guarantees**; all changes still require operator review.
