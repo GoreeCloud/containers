@@ -73,3 +73,7 @@ The real adapter now acquires the per-container cooperative lock and checks the 
 ### Post-acquisition OCI lock identity check
 
 The private per-container cooperative lock now checks its pathname inode, owner and private permissions **after** acquiring the filesystem flock, not only before waiting. This catches a replaced lock pathname during a competing operation's wait. Direct OCI runtime invocations, hostile same-user lock replacement after the check and real kernel process supervision remain unverified and cannot be treated as solved.
+
+### Inert first-party kernel namespace probe
+
+The new gcontainers kernel-probe command creates only an unprivileged copy of its own first-party executable with isolated user, mount, PID, IPC, UTS and network namespace flags and single-caller UID/GID mapping. It compares namespace identities and reports only booleans, not inode identifiers, PIDs, or secret values. No rootfs is mounted and no OCI binary, application, image, networking, or cgroup is configured. Passing namespace creation NEVER verifies OCI isolation, cgroup delegation, seccomp, LSM or runtime provenance and cannot authorize a deployment. A denied clone is reported as unverified rather than bypassed.

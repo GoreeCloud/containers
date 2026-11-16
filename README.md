@@ -24,6 +24,8 @@ Requires Linux and Go 1.27 or later.
 go test ./...
 go build -o gcontainers ./cmd/gcontainers
 ./gcontainers doctor
+# First-party inert Linux rootless namespace check (no OCI workload):
+./gcontainers kernel-probe
 ./gcontainers validate /path/to/oci-bundle
 ```
 
