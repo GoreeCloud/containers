@@ -4,6 +4,8 @@ package stack
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,14 +50,21 @@ type Step struct {
 	Service     string `json:"service"`
 	ImageDigest string `json:"imageDigest"`
 	Replicas    int    `json:"replicas"`
+	Stage       int    `json:"stage"`
 	Operation   string `json:"operation"`
 }
+type Stage struct {
+	Number              int      `json:"number"`
+	IndependentServices []string `json:"independentServices"`
+}
 type Plan struct {
-	StackName        string `json:"stackName"`
-	DryRun           bool   `json:"dryRun"`
-	Steps            []Step `json:"steps"`
-	TotalCPUMilli    int64  `json:"totalCpuMilli"`
-	TotalMemoryBytes int64  `json:"totalMemoryBytes"`
+	StackName        string  `json:"stackName"`
+	SpecSHA256       string  `json:"specSHA256"`
+	DryRun           bool    `json:"dryRun"`
+	Steps            []Step  `json:"steps"`
+	Stages           []Stage `json:"stages"`
+	TotalCPUMilli    int64   `json:"totalCpuMilli"`
+	TotalMemoryBytes int64   `json:"totalMemoryBytes"`
 }
 
 func Load(path string) (Spec, error) {
@@ -177,24 +186,79 @@ func order(serviceByName map[string]Service) ([]string, error) {
 	}
 	return ordered, nil
 }
+
+// DryRun produces a deterministic, fingerprinted proposal with explicit
+// parallel stages. It never contacts a daemon or modifies any workload.
 func DryRun(s Spec) (Plan, error) {
 	if err := Validate(s); err != nil {
 		return Plan{}, err
 	}
-	serviceByName := map[string]Service{}
+	byName := map[string]Service{}
 	for _, svc := range s.Services {
-		serviceByName[svc.Name] = svc
+		byName[svc.Name] = svc
 	}
-	ordered, _ := order(serviceByName)
-	plan := Plan{StackName: s.Metadata.Name, DryRun: true, Steps: make([]Step, 0, len(ordered))}
+	ordered, _ := order(byName)
+	stageByName := map[string]int{}
+	stages := map[int][]string{}
+	highest := 0
 	for _, name := range ordered {
-		svc := serviceByName[name]
-		plan.Steps = append(plan.Steps, Step{Service: name, ImageDigest: svc.Image, Replicas: svc.Replicas, Operation: "would-deploy"})
-		plan.TotalCPUMilli += svc.Resources.CPUMilli * int64(svc.Replicas)
-		plan.TotalMemoryBytes += svc.Resources.MemoryBytes * int64(svc.Replicas)
+		stage := 0
+		for _, dep := range byName[name].DependsOn {
+			if candidate := stageByName[dep] + 1; candidate > stage {
+				stage = candidate
+			}
+		}
+		stageByName[name] = stage
+		stages[stage] = append(stages[stage], name)
+		if stage > highest {
+			highest = stage
+		}
+	}
+	fingerprint, err := canonicalFingerprint(s)
+	if err != nil {
+		return Plan{}, err
+	}
+	plan := Plan{StackName: s.Metadata.Name, SpecSHA256: fingerprint, DryRun: true,
+		Steps: make([]Step, 0, len(ordered)), Stages: make([]Stage, 0, highest+1)}
+	for i := 0; i <= highest; i++ {
+		names := stages[i]
+		sort.Strings(names)
+		plan.Stages = append(plan.Stages, Stage{Number: i, IndependentServices: append([]string(nil), names...)})
+		for _, name := range names {
+			svc := byName[name]
+			plan.Steps = append(plan.Steps, Step{
+				Service: name, ImageDigest: svc.Image, Replicas: svc.Replicas, Stage: i, Operation: "would-deploy"})
+			plan.TotalCPUMilli += svc.Resources.CPUMilli * int64(svc.Replicas)
+			plan.TotalMemoryBytes += svc.Resources.MemoryBytes * int64(svc.Replicas)
+		}
 	}
 	return plan, nil
 }
+
+// canonicalFingerprint excludes JSON formatting and original service/reference
+// ordering. It is an audit identifier, NOT a signature, policy approval, or
+// authorization to apply a plan.
+func canonicalFingerprint(s Spec) (string, error) {
+	canonical := s
+	canonical.Services = append([]Service(nil), s.Services...)
+	for i := range canonical.Services {
+		svc := &canonical.Services[i]
+		svc.DependsOn = append([]string(nil), svc.DependsOn...)
+		svc.SecretRefs = append([]string(nil), svc.SecretRefs...)
+		sort.Strings(svc.DependsOn)
+		sort.Strings(svc.SecretRefs)
+	}
+	sort.Slice(canonical.Services, func(i, j int) bool {
+		return canonical.Services[i].Name < canonical.Services[j].Name
+	})
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
 func rejectDuplicate(b []byte) error {
 	d := json.NewDecoder(bytes.NewReader(b))
 	if err := walk(d, 0); err != nil {

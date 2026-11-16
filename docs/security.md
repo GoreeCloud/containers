@@ -29,3 +29,7 @@ Dedicated rootless test host; kernel namespace/cgroup/LSM/seccomp experiments; m
 ## Native stack declaration preview
 
 The JSON-only stack schema is the **first-priority GoreeCloud definition format**. Its parser limits size/nesting, rejects duplicate keys, unknown fields, arbitrary host ports/mounts, mutable image references, root privileges, non-isolated networking, cycles and unbounded resource requests. Its plan is a **read-only proposal**, not a deployment action or policy enforcement at runtime. Secret references remain unresolved identifiers and must later integrate with GoreeCloud Identity, GoreeShield and Wardveil policy. No remote admission, storage, image fetch, runtime execution or Compose parsing is implemented here.
+
+## Deterministic stage planning
+
+Native stack plans now group independent services into dependency-safe parallel stages and include a canonical SHA-256 declaration fingerprint. These are deterministic, read-only planning artifacts, not an authorization or implementation of concurrent deployment. Stage dependencies and privacy controls must be revalidated at actual apply time; a matching fingerprint does not guarantee registry provenance or safe execution.

@@ -107,3 +107,73 @@ func FuzzNativeStackParser(f *testing.F) {
 		_, _ = Parse(b)
 	})
 }
+
+func TestDeterministicParallelStagesAndFingerprint(t *testing.T) {
+	db := minimalService("db")
+	cache := minimalService("cache")
+	web := minimalService("web")
+	worker := minimalService("worker")
+	web["dependsOn"] = []string{"db", "cache"}
+	worker["dependsOn"] = []string{"cache"}
+	raw1 := fixture(web, db, cache, worker)
+	raw2 := fixture(worker, cache, db, web)
+	s1, err := Parse(raw1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := Parse(raw2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p1, err := DryRun(s1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := DryRun(s2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p1.SpecSHA256 != p2.SpecSHA256 || !strings.HasPrefix(p1.SpecSHA256, "sha256:") {
+		t.Fatalf("fingerprint should ignore order: %s vs %s", p1.SpecSHA256, p2.SpecSHA256)
+	}
+	if len(p1.Stages) != 2 || p1.Stages[0].Number != 0 ||
+		len(p1.Stages[0].IndependentServices) != 2 || p1.Stages[1].Number != 1 ||
+		len(p1.Stages[1].IndependentServices) != 2 {
+		t.Fatalf("unexpected parallel stage plan: %+v", p1.Stages)
+	}
+	if p1.Steps[0].Service != "cache" || p1.Steps[1].Service != "db" ||
+		p1.Steps[2].Service != "web" || p1.Steps[3].Service != "worker" {
+		t.Fatalf("unexpected ordered plan steps: %+v", p1.Steps)
+	}
+	for _, step := range p1.Steps {
+		if step.Service == "web" && step.Stage != 1 || step.Service == "db" && step.Stage != 0 {
+			t.Fatalf("unsafe dependency stages: %+v", p1.Steps)
+		}
+	}
+	if p1.DryRun != true {
+		t.Fatal("dry run flag must be true")
+	}
+}
+func TestChangedStackChangesFingerprint(t *testing.T) {
+	a := minimalService("web")
+	one, err := Parse(fixture(a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan1, err := DryRun(one)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a["replicas"] = 2
+	two, err := Parse(fixture(a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan2, err := DryRun(two)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan1.SpecSHA256 == plan2.SpecSHA256 {
+		t.Fatal("changed workload spec not reflected in plan fingerprint")
+	}
+}
