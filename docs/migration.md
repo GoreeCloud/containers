@@ -9,6 +9,6 @@ The founder's long-term direction is for GoreeCloud Containers to become the eco
 5. Rehearse real restore and rollback, then select individual low-risk canary workloads. Preserve the working incumbent and original data until accepted.
 6. Promote to the default engine only for verified workloads. Record exact evidence, owner authorization for consequential cutovers, and remove obsolete configurations only after explicit decommissioning approval.
 
-**Infrastructure boundary:** Primary Laptop for development and administration; VPS Mesh is the future centralized hosting environment. VPS-01 and VPS-02 are migration-only legacy instances: no new workloads, agents or configurations. Do not deploy this prototype to either legacy host.
+**Infrastructure boundary:** Primary Laptop for development and administration; VPS Mesh is the centralized hosting target. Retiring legacy servers remain migration-only, with no new workloads, agents or configurations. Do not deploy this prototype to legacy infrastructure.
 
 **Current state:** no Docker/Podman workload migrated, no legacy engine removed, no production service changed.
