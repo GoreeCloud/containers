@@ -44,4 +44,4 @@ No Kubernetes distribution, no rootful-by-default daemon, no Docker socket imper
 
 ## Target operating environment
 
-Primary development: the founder's Linux laptop. Future staging and production: VPS Mesh. Never deploy new workloads to legacy VPS-01 or VPS-02. Production remains unchanged in this milestone.
+Primary development is the founder's Linux laptop; VPS Mesh is the sole designated VPS for future staging and deployment. Retiring legacy infrastructure remains migration-only, with no new workloads or configurations. Production remains unchanged in this milestone.
