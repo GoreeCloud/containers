@@ -149,3 +149,7 @@ The real adapter now acquires the per-container cooperative lock and checks the 
 ### Hardened individual blob verification
 
 The private store Verify operation now rejects group/world-readable files, unexpected ownership, extra hardlinks, unsafe symlink paths, and changes in the opened file/path identity during verification. Bounded, cancellation-aware hashing detects content mismatch and unexpected growth. This closes deduplication checks that previously relied primarily on matching bytes; it remains a moment-in-time integrity check, not source authentication or resistance to hostile same-user modification.
+
+### Single-source native preflight
+
+The read-only native stack preflight command parses the source and target declarations once and evaluates a prior canonical SHA-256 fingerprint, old/new resource overlap and downstream dependency impact on the same in-memory values. Stale source fingerprints or over-budget declarations fail with a structured report. Even when both input checks pass, the report has deploymentAuthorized=false, liveStateVerified=false and rollbackVerified=false. The CLI never contacts running workloads or modifies an application.
