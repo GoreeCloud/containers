@@ -86,6 +86,13 @@ func New(binary, stateRoot string, runner Runner) (*Engine, error) {
 		return nil, errors.New("only audited OCI runtime names crun/runc are permitted")
 	}
 	if runner == nil {
+		// An actual process runner must satisfy the current fail-closed
+		// external-runtime version and filesystem provenance baseline.
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+		if err := CheckInstalledRuntime(ctx, binary); err != nil {
+			return nil, err
+		}
 		runner = ProcessRunner{}
 	}
 	return &Engine{Binary: binary, StateRoot: stateRoot, Runner: runner}, nil
