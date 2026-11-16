@@ -34,6 +34,16 @@ jobs:
           printf 'synthetic OCI blob only\n' > "$d/blob"
           ./gcontainers image import --store "$d/store" --file "$d/blob" --experimental > "$d/import.json"
           grep -Fq '"Digest": "sha256:' "$d/import.json"
+          ./gcontainers image audit --store "$d/store" > "$d/audit.json"
+          grep -Fq '"readOnly": true' "$d/audit.json"
+          grep -Fq '"verified": true' "$d/audit.json"
+          grep -Fq '"blobCount": 1' "$d/audit.json"
+          grep -Fq '"sourceProvenanceVerified": false' "$d/audit.json"
+          if ./gcontainers image audit --store "$d/missing-store" > "$d/missing.json" 2>/dev/null; then
+            echo "Read-only audit must reject a missing store" >&2
+            exit 1
+          fi
+          test ! -e "$d/missing-store"
           ./gcontainers host inspect > "$d/host.json"
           grep -Fq '"readOnly": true' "$d/host.json"
           grep -Fq '"deploymentAuthorized": false' "$d/host.json"
