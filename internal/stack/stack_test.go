@@ -96,3 +96,14 @@ func TestDocumentBoundsAndSymlinks(t *testing.T) {
 		t.Fatal("symlink stack accepted")
 	}
 }
+
+func FuzzNativeStackParser(f *testing.F) {
+	f.Add(fixture(minimalService("web")))
+	f.Add([]byte("{\"apiVersion\":0,\"kind\":\"Stack\"}"))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		if len(b) > 8192 {
+			t.Skip()
+		}
+		_, _ = Parse(b)
+	})
+}
