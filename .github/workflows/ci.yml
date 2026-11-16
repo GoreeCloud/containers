@@ -77,9 +77,34 @@ jobs:
           grep -Fq '"pending": false' "$d/pending.json"
           grep -Fq '"readOnly": true' "$d/pending.json"
           grep -Fq '"recoveryRequired": false' "$d/pending.json"
+          XDG_RUNTIME_DIR="$d/xdg" ./gcontainers oci pending-summary > "$d/census.json"
+          grep -Fq '"pendingCount": 0' "$d/census.json"
+          grep -Fq '"runtimeStateVerified": false' "$d/census.json"
+          printf '%s' '{"version":1,"id":"example","operation":"create"}' > "$d/xdg/goreecloud-containers/journal/example.pending"
+          chmod 600 "$d/xdg/goreecloud-containers/journal/example.pending"
+          if XDG_RUNTIME_DIR="$d/xdg" ./gcontainers oci pending-summary > "$d/pending-census.json" 2>/dev/null; then
+            echo "Unresolved synthetic OCI mutation must fail journal census" >&2
+            exit 1
+          fi
+          grep -Fq '"pendingCount": 1' "$d/pending-census.json"
+          grep -Fq '"recoveryRequired": true' "$d/pending-census.json"
+          if grep -Fq 'example' "$d/pending-census.json"; then
+            echo "Private OCI container ID leaked in census" >&2
+            exit 1
+          fi
+          rm -- "$d/xdg/goreecloud-containers/journal/example.pending"
           ./gcontainers stack capacity examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/capacity.json"
           grep -Fq '"withinLimits": true' "$d/capacity.json"
           grep -Fq '"deploymentAuthorized": false' "$d/capacity.json"
+          ./gcontainers stack transition-capacity examples/native-stack.json examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/transition-capacity.json"
+          grep -Fq '"withinBudget": true' "$d/transition-capacity.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/transition-capacity.json"
+          grep -Fq '"rollbackVerified": false' "$d/transition-capacity.json"
+          if ./gcontainers stack transition-capacity examples/native-stack.json examples/native-stack.json --cpu-milli 100 --memory-mib 1 --max-instances 1 > "$d/transition-overcommit.json" 2>/dev/null; then
+            echo "Oversubscribed native transition must fail closed" >&2
+            exit 1
+          fi
+          grep -Fq '"withinBudget": false' "$d/transition-overcommit.json"
           if ./gcontainers stack capacity examples/native-stack.json --cpu-milli 100 --memory-mib 1 --max-instances 1 > "$d/overcommit.json"; then
             echo "Oversubscribed native stack budget must fail closed" >&2
             exit 1
