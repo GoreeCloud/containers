@@ -80,3 +80,119 @@ func TestTooLargeAndSymlink(t *testing.T) {
 		t.Fatal("symlink accepted")
 	}
 }
+
+func TestMappingsRejectOverlaps(t *testing.T) {
+	cases := [][]IDMap{
+		{{ContainerID: 0, HostID: 1000, Size: 10}, {ContainerID: 10, HostID: 1005, Size: 10}},
+		{{ContainerID: 0, HostID: 1000, Size: 10}, {ContainerID: 5, HostID: 2000, Size: 10}},
+		{{ContainerID: 0, HostID: 0, Size: 1}},
+		{{ContainerID: 0, HostID: 1000, Size: 0}},
+	}
+	for _, maps := range cases {
+		if validMaps(maps) {
+			t.Errorf("overlap/invalid mapping accepted: %+v", maps)
+		}
+	}
+	if !validMaps([]IDMap{{ContainerID: 0, HostID: 1000, Size: 10}, {ContainerID: 10, HostID: 2000, Size: 10}}) {
+		t.Fatal("non-overlapping mappings rejected")
+	}
+}
+func TestPreviewMountAndSeccompRestrictions(t *testing.T) {
+	cases := []string{
+		strings.Replace(safeSpec, "\"linux\":", "\"mounts\":[{\"destination\":\"/tmp\",\"type\":\"tmpfs\",\"source\":\"tmpfs\",\"options\":[\"size=99999999\"]}],\"linux\":", 1),
+		strings.Replace(safeSpec, "\"linux\":", "\"mounts\":[{\"destination\":\"/proc\",\"type\":\"proc\",\"source\":\"proc\",\"options\":[\"rw\"]}],\"linux\":", 1),
+		strings.Replace(safeSpec, "\"defaultAction\":\"SCMP_ACT_ERRNO\"", "\"defaultAction\":\"SCMP_ACT_ERRNO\",\"syscalls\":[{\"names\":[\"mount\"],\"action\":\"SCMP_ACT_ALLOW\"}]", 1),
+		strings.Replace(safeSpec, "\"defaultAction\":\"SCMP_ACT_ERRNO\"", "\"defaultAction\":\"SCMP_ACT_ERRNO\",\"flags\":[\"SECCOMP_FILTER_FLAG_TSYNC\"]", 1),
+	}
+	for _, raw := range cases {
+		if err := Validate(setup(t, raw)); err == nil {
+			t.Fatal("unsafe mount/seccomp config accepted")
+		}
+	}
+}
+
+func FuzzBundleStrictJSON(f *testing.F) {
+	f.Add([]byte(safeSpec))
+	f.Add([]byte("{\"a\":1,\"a\":2}"))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		if len(b) > 8192 {
+			t.Skip()
+		}
+		_ = rejectDuplicateKeys(b)
+	})
+}
+
+func TestCallerOnlyMappingPolicy(t *testing.T) {
+	spec, err := Load(setup(t, safeSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireSingleCallerMapping(spec, 1000, 1000); err != nil {
+		t.Fatal(err)
+	}
+	for _, ids := range [][2]uint32{{0, 1000}, {1000, 0}, {2000, 1000}, {1000, 2000}} {
+		if err := RequireSingleCallerMapping(spec, ids[0], ids[1]); err == nil {
+			t.Fatalf("unapproved mapping accepted: %v", ids)
+		}
+	}
+	spec.Linux.UIDMappings = append(spec.Linux.UIDMappings, IDMap{ContainerID: 1, HostID: 2000, Size: 1})
+	if err := RequireSingleCallerMapping(spec, 1000, 1000); err == nil {
+		t.Fatal("unsupported subordinate map accepted")
+	}
+}
+func TestProcessPreviewRestrictions(t *testing.T) {
+	cases := []*Process{
+		{Args: []string{"relative"}, Cwd: "/"},
+		{Args: []string{"/bin/../etc/passwd"}, Cwd: "/"},
+		{Args: []string{"/bin/true"}, Cwd: "tmp"},
+		{Args: []string{"/bin/true"}, Cwd: "/", Env: []string{"A=1", "A=2"}},
+		{Args: []string{"/bin/true"}, Cwd: "/", Env: []string{"1BAD=x"}},
+		{Args: []string{"/bin/true"}, Cwd: "/", Env: []string{"X"}},
+		{Args: []string{"/bin/true"}, Cwd: "/", Env: []string{"A=good" + strings.Repeat("x", 4096)}},
+	}
+	for i, p := range cases {
+		if err := validateProcess(p); err == nil {
+			t.Fatalf("invalid process %d accepted", i)
+		}
+	}
+	if err := validateProcess(&Process{Args: []string{"/bin/true"}, Cwd: "/", Env: []string{"LANG=C"}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBundleLoadRejectsSymlinkedRootAndAncestor(t *testing.T) {
+	original := setup(t, safeSpec)
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(original, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(link); err == nil {
+		t.Fatal("symlinked OCI bundle accepted")
+	}
+	rootfs := filepath.Join(original, "rootfs")
+	if err := os.Rename(rootfs, rootfs+"-real"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("rootfs-real", rootfs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(original); err == nil {
+		t.Fatal("symlinked rootfs accepted")
+	}
+}
+func TestBundleLoadRejectsSymlinkedIntermediateRootfs(t *testing.T) {
+	raw := strings.Replace(safeSpec, `"path":"rootfs"`, `"path":"base/rootfs"`, 1)
+	dir := setup(t, raw)
+	if err := os.Mkdir(filepath.Join(dir, "real"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "rootfs"), filepath.Join(dir, "real", "rootfs")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real", filepath.Join(dir, "base")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil {
+		t.Fatal("symlinked rootfs parent accepted")
+	}
+}

@@ -3,7 +3,9 @@
 | Capability | Status | Evidence / limitation |
 | --- | --- | --- |
 | First-party Go command-line prototype | Development | cmd/gcontainers; Linux CI |
-| OCI bundle policy validation | Development | internal/bundle; no guarantee of isolation |
+| OCI bundle policy validation | Development | internal/bundle; strict process bounds and caller-only UID/GID mapping and reviewed external runtime version preflight; no guarantee of isolation |
+| Read-only OCI incident census | Development | Private per-operation aggregate counts; nonzero on unresolved mutation; no process state attestation |
+| Inert first-party kernel namespace probe | Development | User/mount/PID/IPC/UTS/net separation observation, not OCI confinement or deployment acceptance |
 | OCI lifecycle adapter via crun/runc | Development | internal/engine; real kernel runtime acceptance open |
 | Rootless image store and OCI registry support | Planned | M2: no production image pull/build |
 | Rootless network, volumes and cgroups | Planned | M3 |

@@ -36,6 +36,16 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "help", "--help", "-h":
 		return usage(out)
+	case "__kernel-probe-child":
+		if len(args) != 1 {
+			return errors.New("kernel probe child takes no arguments")
+		}
+		return runKernelProbeChild(out)
+	case "kernel-probe":
+		if len(args) != 1 {
+			return errors.New("kernel-probe takes no flags")
+		}
+		return runKernelProbe(out)
 	case "doctor":
 		if len(args) != 1 {
 			return errors.New("doctor takes no arguments")
@@ -60,30 +70,45 @@ func usage(w io.Writer) error {
 	_, err := fmt.Fprintln(w, `GoreeCloud Containers 0.1.0-dev — Linux rootless OCI preview
 Usage:
   gcontainers doctor
+  gcontainers kernel-probe  # inert rootless namespace check, NOT OCI acceptance
   gcontainers validate BUNDLE_DIRECTORY
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
   gcontainers oci start|stop|delete --id NAME --experimental
   gcontainers oci state --id NAME
+  gcontainers oci pending-summary  # privacy-minimized inventory, fails on incidents
+  gcontainers oci pending --id NAME    # read-only unresolved intent inspection
 Options for OCI commands: --runtime=crun|runc
 No images, networking, Compose or production deployment is implemented yet.`)
 	return err
 }
 func doctor(w io.Writer) error {
 	uid := os.Geteuid()
-	_, crunErr := exec.LookPath("crun")
-	_, runcErr := exec.LookPath("runc")
+	crunPath, crunErr := exec.LookPath("crun")
+	runcPath, runcErr := exec.LookPath("runc")
+	crunEligible := false
+	runcEligible := false
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	defer cancel()
+	if crunErr == nil && engine.CheckInstalledRuntime(ctx, crunPath) == nil {
+		crunEligible = true
+	}
+	if runcErr == nil && engine.CheckInstalledRuntime(ctx, runcPath) == nil {
+		runcEligible = true
+	}
 	_, cgErr := os.Stat("/sys/fs/cgroup/cgroup.controllers")
 	info := map[string]any{
-		"product":             "GoreeCloud Containers",
-		"version":             version,
-		"os":                  runtime.GOOS,
-		"arch":                runtime.GOARCH,
-		"rootless_user":       uid != 0,
-		"cgroup_v2_present":   cgErr == nil,
-		"crun_present":        crunErr == nil,
-		"runc_present":        runcErr == nil,
-		"xdg_runtime_dir_set": os.Getenv("XDG_RUNTIME_DIR") != "",
-		"production_ready":    false,
+		"product":                    "GoreeCloud Containers",
+		"version":                    version,
+		"os":                         runtime.GOOS,
+		"arch":                       runtime.GOARCH,
+		"rootless_user":              uid != 0,
+		"cgroup_v2_present":          cgErr == nil,
+		"crun_present":               crunErr == nil,
+		"runc_present":               runcErr == nil,
+		"crun_security_baseline_met": crunEligible,
+		"runc_security_baseline_met": runcEligible,
+		"xdg_runtime_dir_set":        os.Getenv("XDG_RUNTIME_DIR") != "",
+		"production_ready":           false,
 	}
 	b, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
@@ -98,7 +123,7 @@ func oci(args []string, w io.Writer) error {
 	}
 	action := args[0]
 	switch action {
-	case "create", "start", "state", "stop", "delete":
+	case "create", "start", "state", "stop", "delete", "pending", "pending-summary":
 	default:
 		return errors.New("unsupported OCI action")
 	}
@@ -117,10 +142,40 @@ func oci(args []string, w io.Writer) error {
 	if fs.NArg() != 0 {
 		return errors.New("unexpected positional argument")
 	}
+	if action == "pending-summary" {
+		if *id != "" || *dir != "" || *experimental || *backend != "crun" {
+			return errors.New("OCI pending-summary is read-only, takes no flags and never invokes a runtime")
+		}
+		base := os.Getenv("XDG_RUNTIME_DIR")
+		if !filepath.IsAbs(base) || filepath.Clean(base) != base {
+			return errors.New("XDG_RUNTIME_DIR must be a clean absolute path")
+		}
+		resolved, err := filepath.EvalSymlinks(base)
+		if err != nil || resolved != base {
+			return errors.New("symlinked runtime directory unsupported")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		report, err := engine.InspectJournal(ctx, filepath.Join(base, "goreecloud-containers"))
+		if err != nil {
+			return err
+		}
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		if _, err = fmt.Fprintln(w, string(data)); err != nil {
+			return err
+		}
+		if report.RecoveryRequired {
+			return engine.ErrUnresolvedMutation
+		}
+		return nil
+	}
 	if err := engine.ValidateID(*id); err != nil {
 		return err
 	}
-	if action != "state" && !*experimental {
+	if action != "state" && action != "pending" && !*experimental {
 		return errors.New("OCI mutations require --experimental")
 	}
 	if action == "create" && *dir == "" {
@@ -129,9 +184,41 @@ func oci(args []string, w io.Writer) error {
 	if *backend != "crun" && *backend != "runc" {
 		return errors.New("only crun and runc are allowed")
 	}
+	if action == "pending" {
+		if *dir != "" || *experimental {
+			return errors.New("pending inspection is read-only and accepts only --id")
+		}
+		base := os.Getenv("XDG_RUNTIME_DIR")
+		if !filepath.IsAbs(base) || filepath.Clean(base) != base {
+			return errors.New("XDG_RUNTIME_DIR must be a clean absolute path")
+		}
+		resolved, err := filepath.EvalSymlinks(base)
+		if err != nil || resolved != base {
+			return errors.New("symlinked runtime directory unsupported")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		pending, err := engine.ReadPendingMutation(ctx, filepath.Join(base, "goreecloud-containers"), *id)
+		if err != nil {
+			return err
+		}
+		encoded, err := json.MarshalIndent(pending, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(w, string(encoded))
+		return err
+	}
 	path, err := exec.LookPath(*backend)
 	if err != nil {
 		return fmt.Errorf("required OCI runtime %s not installed", *backend)
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if err := engine.TrustedRuntimeBinary(path); err != nil {
+		return err
 	}
 	path, err = filepath.Abs(path)
 	if err != nil {
