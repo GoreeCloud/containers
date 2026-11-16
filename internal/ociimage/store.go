@@ -259,8 +259,11 @@ func (s *Store) Put(ctx context.Context, source io.Reader) (BlobInfo, error) {
 // race-free. os.Root anchors paths and inode comparison detects many swaps,
 // but hostile same-user modification and bind mounts remain unsupported.
 func (s *Store) Verify(ctx context.Context, digest string) (int64, error) {
-	if ctx == nil {
-		return 0, errors.New("context required")
+	if s == nil || ctx == nil {
+		return 0, errors.New("store and context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 	if !digestPattern.MatchString(digest) {
 		return 0, errors.New("invalid image blob digest")
@@ -271,39 +274,51 @@ func (s *Store) Verify(ctx context.Context, digest string) (int64, error) {
 	}
 	defer root.Close()
 	name := "blobs/sha256/" + digest[len("sha256:"):]
-	fi, err := root.Lstat(name)
+	checked, err := root.Lstat(name)
 	if err != nil {
 		return 0, err
 	}
-	if !fi.Mode().IsRegular() || fi.Size() > s.maxBytes {
-		return 0, errors.New("nonregular or oversize stored blob")
+	if !checked.Mode().IsRegular() || checked.Size() < 0 || checked.Size() > s.maxBytes ||
+		checked.Mode().Perm()&0077 != 0 {
+		return 0, errors.New("stored blob must be a bounded private regular file")
 	}
-	f, err := root.Open(name)
+	meta, ok := checked.Sys().(*syscall.Stat_t)
+	if !ok || meta.Uid != uint32(os.Geteuid()) || meta.Nlink != 1 {
+		return 0, errors.New("stored blob owner or hardlinks unsafe")
+	}
+	file, err := root.Open(name)
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
-	actual, err := f.Stat()
-	if err != nil {
-		return 0, err
-	}
-	if !os.SameFile(fi, actual) || !actual.Mode().IsRegular() {
-		return 0, errors.New("stored blob changed between metadata check and open")
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(checked, opened) || !opened.Mode().IsRegular() {
+		return 0, errors.New("stored blob changed before opening")
 	}
 	hash := sha256.New()
-	buffer := make([]byte, 32<<10)
+	buf := make([]byte, 32<<10)
 	var total int64
+	idle := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
-		n, readErr := f.Read(buffer)
+		n, readErr := file.Read(buf)
+		if n < 0 || n > len(buf) {
+			return 0, errors.New("invalid stored blob read count")
+		}
 		if n > 0 {
+			idle = 0
 			total += int64(n)
-			if total > s.maxBytes {
-				return 0, errors.New("stored blob grew past quota")
+			if total > checked.Size() || total > s.maxBytes {
+				return 0, errors.New("stored blob grew while verifying")
 			}
-			hash.Write(buffer[:n])
+			hash.Write(buf[:n])
+		} else if readErr == nil {
+			idle++
+			if idle > 100 {
+				return 0, io.ErrNoProgress
+			}
 		}
 		if readErr == io.EOF {
 			break
@@ -312,7 +327,16 @@ func (s *Store) Verify(ctx context.Context, digest string) (int64, error) {
 			return 0, readErr
 		}
 	}
-	if total != fi.Size() || hex.EncodeToString(hash.Sum(nil)) != digest[len("sha256:"):] {
+	afterFD, err := file.Stat()
+	if err != nil {
+		return 0, err
+	}
+	afterPath, err := root.Lstat(name)
+	if err != nil || !os.SameFile(opened, afterFD) || !os.SameFile(opened, afterPath) ||
+		afterFD.Size() != checked.Size() || afterPath.Size() != checked.Size() {
+		return 0, errors.New("stored blob changed while verifying")
+	}
+	if total != checked.Size() || hex.EncodeToString(hash.Sum(nil)) != digest[len("sha256:"):] {
 		return 0, errors.New("stored blob digest or size mismatch")
 	}
 	return total, nil
