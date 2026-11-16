@@ -163,6 +163,10 @@ func (s *Store) Audit(ctx context.Context) (AuditReport, error) {
 				return empty, fmt.Errorf("stored blob read: %w", readErr)
 			}
 		}
+		if err := confirmAuditedBlobPath(root, file, info, relative); err != nil {
+			file.Close()
+			return empty, err
+		}
 		if err := file.Close(); err != nil {
 			return empty, err
 		}
@@ -236,5 +240,26 @@ func (s *Store) inspectPendingImports(ctx context.Context, root *os.Root, report
 		report.PendingImportBytes += info.Size()
 	}
 	report.OperatorReviewRequired = report.PendingImportFiles > 0
+	return nil
+}
+
+// confirmAuditedBlobPath reduces races between the initial Lstat, content
+// hashing and returning a positive audit result. It does not freeze a file:
+// direct malicious same-user edits after this check remain a release blocker.
+func confirmAuditedBlobPath(root *os.Root, file *os.File, prior os.FileInfo, name string) error {
+	opened, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	current, err := root.Lstat(name)
+	if err != nil || !os.SameFile(prior, opened) || !os.SameFile(opened, current) ||
+		opened.Size() != prior.Size() || current.Size() != prior.Size() ||
+		!current.Mode().IsRegular() || current.Mode().Perm()&0077 != 0 {
+		return errors.New("committed OCI blob changed during integrity scan")
+	}
+	st, ok := current.Sys().(*syscall.Stat_t)
+	if !ok || st.Uid != uint32(os.Geteuid()) || st.Nlink != 1 {
+		return errors.New("committed OCI blob ownership changed during integrity scan")
+	}
 	return nil
 }

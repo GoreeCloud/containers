@@ -71,3 +71,7 @@ The OCI writer lock now rechecks its pathname inode **after** acquiring the advi
 The private store Verify operation now rejects group/world-readable files, unexpected ownership, extra hardlinks, unsafe symlink paths, and changes in the opened file/path identity during verification. Bounded, cancellation-aware hashing detects content mismatch and unexpected growth. This closes deduplication checks that previously relied primarily on matching bytes; it remains a moment-in-time integrity check, not source authentication or resistance to hostile same-user modification.
 
 The full-store audit now enforces the same private ownership, no-extra-hardlink and no group/world access rules for committed blobs as individual digest verification. It fails on unsafe mode/ownership metadata rather than claiming the whole store was verified.
+
+### Post-hash blob identity revalidation
+
+The read-only full-store integrity audit now rechecks every committed blob's opened-file and pathname identities, size, owner, private mode and link count after hashing but before accepting its digest. Synthetic tests prove detection of same-size pathname replacement and permission changes during an inspection. This is a bounded observational check, not an immutable filesystem snapshot, cryptographic source signature or malicious same-user write defense.
