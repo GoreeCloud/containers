@@ -26,6 +26,8 @@ Requires Linux and Go 1.27 or later.
 go test ./...
 go build -o gcontainers ./cmd/gcontainers
 ./gcontainers doctor
+# Read-only SHA256 verification of all committed blobs in a private store:
+./gcontainers image audit --store /home/you/private-image-store
 ./gcontainers image verify /path/to/oci-layout
 ./gcontainers image inspect-layer /path/to/layer.tar tar
 # Optional experimental local blob import (opaque bytes only):

@@ -49,3 +49,7 @@ The read-only verifier now opens the OCI layout through a directory handle (os.R
 ## Bounded compressed-layer stream semantics
 
 OCI tar/gzip inspection now hard-limits compressed input with a reader that **errors** on overflow rather than silently truncating the source, and treats gzip as exactly one member. Trailing compressed bytes and concatenated gzip members are rejected after fully draining/verifying the decompressor checksum. These constraints deliberately reject some inputs that other OCI tools might accept; secure extraction, registry provenance and live image mounting remain unimplemented.
+
+## Local content-store integrity auditing
+
+The read-only image audit command opens an **existing** private user-owned blob store without creating or repairing it. It verifies the SHA-256 bytes of each committed regular file, rejects symlinks, unexpected names, hardlinks, oversized entries, more than 4096 entries, and aggregate audit sizes above 1 GiB. The summary intentionally omits sensitive paths and filenames. A passing audit proves observed byte integrity only, not provenance, signatures, malware safety, registry trust, or protection against same-user mutations after audit. Aggregate limits are verification bounds, **not disk reservations or enforcement of a global write quota**.
