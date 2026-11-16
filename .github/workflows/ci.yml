@@ -26,3 +26,20 @@ jobs:
         run: go vet ./...
       - name: Build
         run: go build ./cmd/gcontainers
+      - name: Nonproduction native CLI smoke
+        run: |
+          set -euo pipefail
+          d="$(mktemp -d)"
+          trap 'rm -rf -- "$d"' EXIT
+          printf 'synthetic OCI blob only\n' > "$d/blob"
+          ./gcontainers image import --store "$d/store" --file "$d/blob" --experimental > "$d/import.json"
+          grep -Fq '"Digest": "sha256:' "$d/import.json"
+          ./gcontainers stack validate examples/native-stack.json
+          ./gcontainers stack plan examples/native-stack.json > "$d/plan.json"
+          grep -Fq '"dryRun": true' "$d/plan.json"
+          grep -Fq '"specSHA256": "sha256:' "$d/plan.json"
+          grep -Fq '"independentServices": [' "$d/plan.json"
+          if ./gcontainers stack apply examples/native-stack.json; then
+            echo "Unimplemented stack apply should fail closed" >&2
+            exit 1
+          fi
