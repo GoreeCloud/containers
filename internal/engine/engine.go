@@ -90,9 +90,10 @@ func (ProcessRunner) Run(ctx context.Context, binary string, args ...string) ([]
 }
 
 type Engine struct {
-	Binary    string
-	StateRoot string
-	Runner    Runner
+	Binary        string
+	StateRoot     string
+	Runner        Runner
+	lockMutations bool
 }
 
 func New(binary, stateRoot string, runner Runner) (*Engine, error) {
@@ -103,6 +104,7 @@ func New(binary, stateRoot string, runner Runner) (*Engine, error) {
 	if name != "runc" && name != "crun" {
 		return nil, errors.New("only audited OCI runtime names crun/runc are permitted")
 	}
+	useLocks := runner == nil
 	if runner == nil {
 		// An actual process runner must satisfy the current fail-closed
 		// external-runtime version and filesystem provenance baseline.
@@ -113,7 +115,7 @@ func New(binary, stateRoot string, runner Runner) (*Engine, error) {
 		}
 		runner = ProcessRunner{}
 	}
-	return &Engine{Binary: binary, StateRoot: stateRoot, Runner: runner}, nil
+	return &Engine{Binary: binary, StateRoot: stateRoot, Runner: runner, lockMutations: useLocks}, nil
 }
 func ValidateID(id string) error {
 	if !idPattern.MatchString(id) {
@@ -126,33 +128,39 @@ func (e *Engine) call(ctx context.Context, op string, args ...string) ([]byte, e
 	return e.Runner.Run(ctx, e.Binary, argv...)
 }
 func (e *Engine) Create(ctx context.Context, id, dir string) error {
-	if err := ValidateID(id); err != nil {
+	return e.mutate(ctx, id, func() error {
+
+		if err := ValidateID(id); err != nil {
+			return err
+		}
+		spec, err := bundle.Load(dir)
+		if err != nil {
+			return err
+		}
+		if err := bundle.RequireSingleCallerMapping(spec, uint32(os.Geteuid()), uint32(os.Getegid())); err != nil {
+			return err
+		}
+		absolute, err := filepath.Abs(dir)
+		if err != nil {
+			return err
+		}
+		_, err = e.call(ctx, "create", "--bundle", absolute, id)
 		return err
-	}
-	spec, err := bundle.Load(dir)
-	if err != nil {
-		return err
-	}
-	if err := bundle.RequireSingleCallerMapping(spec, uint32(os.Geteuid()), uint32(os.Getegid())); err != nil {
-		return err
-	}
-	absolute, err := filepath.Abs(dir)
-	if err != nil {
-		return err
-	}
-	_, err = e.call(ctx, "create", "--bundle", absolute, id)
-	return err
+	})
 }
 func (e *Engine) Start(ctx context.Context, id string) error {
-	state, err := e.readState(ctx, id)
-	if err != nil {
+	return e.mutate(ctx, id, func() error {
+
+		state, err := e.readState(ctx, id)
+		if err != nil {
+			return err
+		}
+		if state.Status != "created" {
+			return errors.New("OCI container must be in created state before start")
+		}
+		_, err = e.call(ctx, "start", id)
 		return err
-	}
-	if state.Status != "created" {
-		return errors.New("OCI container must be in created state before start")
-	}
-	_, err = e.call(ctx, "start", id)
-	return err
+	})
 }
 func (e *Engine) State(ctx context.Context, id string) ([]byte, error) {
 	state, err := e.readState(ctx, id)
@@ -163,26 +171,32 @@ func (e *Engine) State(ctx context.Context, id string) ([]byte, error) {
 	return json.Marshal(state)
 }
 func (e *Engine) Stop(ctx context.Context, id string) error {
-	state, err := e.readState(ctx, id)
-	if err != nil {
+	return e.mutate(ctx, id, func() error {
+
+		state, err := e.readState(ctx, id)
+		if err != nil {
+			return err
+		}
+		if state.Status != "running" {
+			return errors.New("OCI container must be running before a stop request")
+		}
+		_, err = e.call(ctx, "kill", id, "SIGTERM")
 		return err
-	}
-	if state.Status != "running" {
-		return errors.New("OCI container must be running before a stop request")
-	}
-	_, err = e.call(ctx, "kill", id, "SIGTERM")
-	return err
+	})
 }
 func (e *Engine) Delete(ctx context.Context, id string) error {
-	state, err := e.readState(ctx, id)
-	if err != nil {
+	return e.mutate(ctx, id, func() error {
+
+		state, err := e.readState(ctx, id)
+		if err != nil {
+			return err
+		}
+		if state.Status != "created" && state.Status != "stopped" {
+			return errors.New("running OCI container must not be deleted")
+		}
+		_, err = e.call(ctx, "delete", id) // Never force removal of running processes.
 		return err
-	}
-	if state.Status != "created" && state.Status != "stopped" {
-		return errors.New("running OCI container must not be deleted")
-	}
-	_, err = e.call(ctx, "delete", id) // Never force removal of running processes.
-	return err
+	})
 }
 
 // PrepareStateRoot restricts runtime metadata to the invoking unprivileged user.
@@ -202,6 +216,13 @@ func PrepareStateRoot(base string) (string, error) {
 		return "", err
 	}
 	if err := privateDir(state); err != nil {
+		return "", err
+	}
+	locks := filepath.Join(state, "locks")
+	if err := os.Mkdir(locks, 0700); err != nil && !os.IsExist(err) {
+		return "", err
+	}
+	if err := privateDir(locks); err != nil {
 		return "", err
 	}
 	return state, nil
@@ -261,4 +282,17 @@ func TrustedRuntimeBinary(path string) error {
 		}
 	}
 	return nil
+}
+
+// mutate holds the per-container cooperative lock for actual runtime
+// mutations, including the read-state/validate/execute sequence. Mock runner
+// tests bypass the production lock path; lock behavior has dedicated tests.
+func (e *Engine) mutate(ctx context.Context, id string, operation func() error) error {
+	if err := ValidateID(id); err != nil {
+		return err
+	}
+	if e.lockMutations {
+		return WithContainerLock(ctx, e.StateRoot, id, operation)
+	}
+	return operation()
 }

@@ -51,3 +51,7 @@ Read-only OCI state responses now require a matching strict container ID, an acc
 ## OCI bundle descriptor anchoring
 
 Bundle policy parsing now opens an OCI bundle through an os.Root directory handle, rejects a symlinked bundle path, symlinked config entries and symlinks in the declared rootfs directory path. It cross-checks opened config file identity and reads bounded JSON from that same descriptor. **The external OCI runtime still independently reopens paths after validation**; this is a preview TOCTOU reduction, not immutable snapshotting or authorization for untrusted bundle execution. Test rootfs content, file mutation after checks, LSM confinement and failure recovery before runtime acceptance.
+
+## Cross-process cooperative OCI mutation locking
+
+The real low-level runtime adapter now wraps create/start/stop/delete and their state checks in an exclusive per-container lock under a user-owned private runtime directory. Locks are descriptor-anchored, no-follow, permission/owner/inode checked and honor caller cancellation without blocking indefinitely. This prevents conflicting GoreeCloud CLI mutations from running concurrently for the same ID, while independent IDs can proceed concurrently. The lock is **cooperative only**: direct crun/runc invocations, non-GoreeCloud agents, changes to the rootfs after validation, crashes during a runtime operation and runtime state recovery are NOT covered. Tests use synthetic operations only; no OCI container was launched. Avoid treating this as crash-safe or a production admission guarantee.
