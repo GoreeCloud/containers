@@ -8,7 +8,7 @@ All items after M0 are **planned**, not implemented or scheduled promises.
 | M1 — Real isolated runtime | Secure runtime-root handling, immutable bundle snapshots, reliable states and lifecycle, Linux rootless acceptance matrix | Real container start/stop/recovery tests; negative security tests; no known namespace/mount escape |
 | M2 — Images and content store | OCI distribution/image, digests, verified layers, safe unpack, cleanup and image list/pull | Conformance fixtures, bad-archive and digest-tamper tests, storage quotas |
 | M3 — Storage and networking | Named volumes, default-deny DNS/ports, rootless networks, resource controls | Fail-closed networking and storage ownership tests; data recovery |
-| M4 — Application stacks | Compose Spec importer, reconciliation, dependencies, healthchecks, rollback, dry-run migration from Docker/Podman | Representative GoreeCloud Compose stack parity and rollback |
+| M4 — Application stacks | Native GoreeCloud stack validator/planner first; native executor, reconciliation, dependencies, healthchecks, rollback; optional Compose Spec importer and dry-run migration from Docker/Podman | Representative GoreeCloud Compose stack parity and rollback |
 | M5 — Operations API | Rootless daemon, secure local API, identity and authorization, policy hooks, audit/metrics | Fuzz/security review, resource controls, least privilege, versioned contracts |
 | M6 — Ecosystem integration | GoreeCloud Mesh, Identity, GoreeShield, Wardveil, GoreeCloud UI | Real integration, privacy/consent and security acceptance; accessible UI |
 | M7 — VPS Mesh canary | Isolated staging stack only, parallel production, rollback and migration inventory | Same features/data/health/observability under load; recovery rehearsals |

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/GoreeCloud/containers/internal/bundle"
 	"github.com/GoreeCloud/containers/internal/engine"
+	"github.com/GoreeCloud/containers/internal/hostreadiness"
+	"github.com/GoreeCloud/containers/internal/stack"
 )
 
 const version = "0.1.0-dev"
@@ -52,6 +55,99 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "oci":
 		return oci(args[1:], out)
+	case "host":
+		if len(args) != 2 || args[1] != "inspect" {
+			return errors.New("usage: gcontainers host inspect")
+		}
+		if runtime.GOOS != "linux" {
+			return errors.New("host readiness inspection supports Linux only")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		report, err := hostreadiness.Inspect(ctx, os.DirFS("/"), os.Geteuid() != 0)
+		if err != nil {
+			return err
+		}
+		payload, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(out, string(payload))
+		return err
+	case "stack":
+		if len(args) >= 4 && args[1] == "preflight" {
+			return stackPreflight(args[2:], out)
+		}
+		if len(args) >= 4 && args[1] == "revision-check" {
+			return stackRevisionCheck(args[2:], out)
+		}
+		if len(args) >= 4 && args[1] == "transition-capacity" {
+			return stackTransitionCapacity(args[2:], out)
+		}
+		if len(args) == 4 && args[1] == "impact" {
+			old, err := stack.Load(args[2])
+			if err != nil {
+				return err
+			}
+			target, err := stack.Load(args[3])
+			if err != nil {
+				return err
+			}
+			report, err := stack.AnalyzeImpact(old, target)
+			if err != nil {
+				return err
+			}
+			encoded, err := json.MarshalIndent(report, "", "  ")
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(out, string(encoded))
+			return err
+		}
+		if len(args) >= 3 && args[1] == "capacity" {
+			return stackCapacity(args[2:], out)
+		}
+		if len(args) == 4 && args[1] == "diff" {
+			before, err := stack.Load(args[2])
+			if err != nil {
+				return err
+			}
+			after, err := stack.Load(args[3])
+			if err != nil {
+				return err
+			}
+			changes, err := stack.Diff(before, after)
+			if err != nil {
+				return err
+			}
+			serialized, err := json.MarshalIndent(changes, "", "  ")
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(out, string(serialized))
+			return err
+		}
+		if len(args) != 3 || (args[1] != "validate" && args[1] != "plan") {
+			return errors.New("usage: gcontainers stack validate|plan NATIVE_STACK_JSON")
+		}
+		parsed, err := stack.Load(args[2])
+		if err != nil {
+			return err
+		}
+		if args[1] == "validate" {
+			_, err = fmt.Fprintln(out, "native stack declaration valid (no workloads launched)")
+			return err
+		}
+		plan, err := stack.DryRun(parsed)
+		if err != nil {
+			return err
+		}
+		data, err := json.MarshalIndent(plan, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(out, string(data))
+		return err
 	default:
 		return errors.New("unknown command (try help)")
 	}
@@ -60,6 +156,15 @@ func usage(w io.Writer) error {
 	_, err := fmt.Fprintln(w, `GoreeCloud Containers 0.1.0-dev — Linux rootless OCI preview
 Usage:
   gcontainers doctor
+  gcontainers host inspect
+  gcontainers stack validate NATIVE_STACK_JSON
+  gcontainers stack plan NATIVE_STACK_JSON
+  gcontainers stack diff OLD_STACK_JSON NEW_STACK_JSON
+  gcontainers stack impact OLD_STACK_JSON NEW_STACK_JSON
+  gcontainers stack transition-capacity OLD_STACK_JSON NEW_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
+  gcontainers stack revision-check OLD_STACK_JSON NEW_STACK_JSON --expected-current-sha256 SHA256:HEX
+  gcontainers stack preflight OLD_STACK_JSON NEW_STACK_JSON --expected-current-sha256 sha256:HEX --cpu-milli N --memory-mib N --max-instances N
+  gcontainers stack capacity NATIVE_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
   gcontainers validate BUNDLE_DIRECTORY
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
   gcontainers oci start|stop|delete --id NAME --experimental
@@ -173,4 +278,87 @@ func oci(args []string, w io.Writer) error {
 		_, err = fmt.Fprintf(w, "OCI %s: %s (preview)\n", action, *id)
 	}
 	return err
+}
+
+// stackCapacity is a resource-only estimate from caller-supplied budget;
+// it never measures live host resources or launches a workload.
+func stackCapacity(args []string, out io.Writer) error {
+	if len(args) < 2 {
+		return errors.New("usage: stack capacity STACK_JSON --cpu-milli N --memory-mib N --max-instances N")
+	}
+	flags := flag.NewFlagSet("stack capacity", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	cpu := flags.Int64("cpu-milli", 0, "maximum declared millicores")
+	memoryMiB := flags.Int64("memory-mib", 0, "maximum declared MiB")
+	instances := flags.Int("max-instances", 0, "maximum declared instances")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || *memoryMiB <= 0 || *memoryMiB > math.MaxInt64/(1<<20) {
+		return errors.New("invalid capacity flags or memory quota")
+	}
+	parsed, err := stack.Load(args[0])
+	if err != nil {
+		return err
+	}
+	review, err := stack.AssessResources(parsed, stack.ResourceBudget{
+		CPUMilli: *cpu, MemoryBytes: *memoryMiB * (1 << 20), MaxInstances: *instances})
+	if err != nil {
+		return err
+	}
+	encoded, err := json.MarshalIndent(review, "", "  ")
+	if err != nil {
+		return err
+	}
+	if _, err = fmt.Fprintln(out, string(encoded)); err != nil {
+		return err
+	}
+	if !review.WithinLimits {
+		return errors.New("native stack capacity budget exceeded; review blockers")
+	}
+	return nil
+}
+
+// stackTransitionCapacity applies ONLY explicit user-provided budgets to an
+// old+new coexistence estimate; success never approves actual deployment.
+func stackTransitionCapacity(args []string, out io.Writer) error {
+	if len(args) < 3 {
+		return errors.New("usage: stack transition-capacity OLD_JSON NEW_JSON --cpu-milli N --memory-mib N --max-instances N")
+	}
+	flags := flag.NewFlagSet("stack transition-capacity", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	cpu := flags.Int64("cpu-milli", 0, "declared CPU budget in millicores")
+	memoryMiB := flags.Int64("memory-mib", 0, "declared memory budget in MiB")
+	instances := flags.Int("max-instances", 0, "declared max count of instances")
+	if err := flags.Parse(args[2:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || *memoryMiB <= 0 || *memoryMiB > math.MaxInt64/(1<<20) {
+		return errors.New("invalid transition capacity budget flags")
+	}
+	before, err := stack.Load(args[0])
+	if err != nil {
+		return err
+	}
+	after, err := stack.Load(args[1])
+	if err != nil {
+		return err
+	}
+	report, err := stack.AssessTransitionCapacity(before, after, stack.ResourceBudget{
+		CPUMilli: *cpu, MemoryBytes: *memoryMiB * (1 << 20), MaxInstances: *instances,
+	})
+	if err != nil {
+		return err
+	}
+	encoded, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	if _, err = fmt.Fprintln(out, string(encoded)); err != nil {
+		return err
+	}
+	if !report.WithinBudget {
+		return errors.New("native transition overlap exceeds supplied resource budget; manual review required")
+	}
+	return nil
 }

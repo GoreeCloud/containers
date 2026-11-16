@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -30,5 +32,137 @@ func TestInvalidInput(t *testing.T) {
 		if err := run(args, &bytes.Buffer{}); err == nil {
 			t.Fatalf("accepted %v", args)
 		}
+	}
+}
+
+func TestNativeStackCommandsFailClosed(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"stack", "plan", "missing"}, &out); err == nil {
+		t.Fatal("missing stack accepted")
+	}
+	if err := run([]string{"stack", "apply", "whatever"}, &out); err == nil {
+		t.Fatal("unimplemented apply accepted")
+	}
+	if err := run([]string{"stack", "plan"}, &out); err == nil {
+		t.Fatal("invalid invocation accepted")
+	}
+	document := `{
+      "apiVersion":"goreecloud.containers/v1alpha1",
+      "kind":"Stack",
+      "metadata":{"name":"synthetic"},
+      "services":[{
+         "name":"api",
+         "image":"sha256:__HASH__",
+         "replicas":1,
+         "resources":{"cpuMilli":250,"memoryBytes":33554432},
+         "security":{"runAsNonRoot":true,"readOnlyRootFilesystem":true,"network":"isolated"}
+      }]
+    }`
+	document = strings.Replace(document, "__HASH__", strings.Repeat("a", 64), 1)
+	file := filepath.Join(t.TempDir(), "test-stack.json")
+	if err := os.WriteFile(file, []byte(document), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"stack", "validate", file}, &out); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := run([]string{"stack", "plan", file}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"dryRun": true`) || !strings.Contains(out.String(), `"operation": "would-deploy"`) {
+		t.Fatal("unsafe or missing dry-run marker")
+	}
+}
+
+func TestNativeStackDiffCLIIsReadOnly(t *testing.T) {
+	old := strings.Replace(`{"apiVersion":"goreecloud.containers/v1alpha1","kind":"Stack","metadata":{"name":"a"},"services":[{"name":"web","image":"sha256:__HASH__","replicas":1,"resources":{"cpuMilli":250,"memoryBytes":33554432},"security":{"runAsNonRoot":true,"readOnlyRootFilesystem":true,"network":"isolated"}}]}`, "__HASH__", strings.Repeat("a", 64), 1)
+	updated := strings.Replace(old, `"replicas":1`, `"replicas":2`, 1)
+	base := t.TempDir()
+	one := filepath.Join(base, "one.json")
+	two := filepath.Join(base, "two.json")
+	if err := os.WriteFile(one, []byte(old), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(two, []byte(updated), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{"stack", "diff", one, two}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"manualReviewRequired": true`) ||
+		!strings.Contains(out.String(), `"action": "would-replace-manual-review"`) ||
+		!strings.Contains(out.String(), `"dryRun": true`) {
+		t.Fatalf("unsafe dry-run response: %s", out.String())
+	}
+	if err := run([]string{"stack", "diff", one}, &out); err == nil {
+		t.Fatal("missing target accepted")
+	}
+}
+
+func TestNativeStackCapacityCLI(t *testing.T) {
+	document := strings.Replace(`{"apiVersion":"goreecloud.containers/v1alpha1","kind":"Stack","metadata":{"name":"a"},"services":[{"name":"web","image":"sha256:__HASH__","replicas":1,"resources":{"cpuMilli":250,"memoryBytes":33554432},"security":{"runAsNonRoot":true,"readOnlyRootFilesystem":true,"network":"isolated"}}]}`, "__HASH__", strings.Repeat("a", 64), 1)
+	file := filepath.Join(t.TempDir(), "stack.json")
+	if err := os.WriteFile(file, []byte(document), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{"stack", "capacity", file, "--cpu-milli", "500", "--memory-mib", "64", "--max-instances", "4"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"deploymentAuthorized": false`) || !strings.Contains(out.String(), `"withinLimits": true`) {
+		t.Fatal("capacity output should never authorize deployment")
+	}
+	out.Reset()
+	if err := run([]string{"stack", "capacity", file, "--cpu-milli", "100", "--memory-mib", "16", "--max-instances", "1"}, &out); err == nil {
+		t.Fatal("oversubscription must fail")
+	}
+	if !strings.Contains(out.String(), `"withinLimits": false`) {
+		t.Fatal("failed check must contain structured denial")
+	}
+	out.Reset()
+	if err := run([]string{"stack", "capacity", file}, &out); err == nil {
+		t.Fatal("missing explicit host budgets accepted")
+	}
+}
+
+func TestHostInspectionIsAdvisoryOnly(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"host", "inspect"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"readOnly": true`) ||
+		!strings.Contains(out.String(), `"deploymentAuthorized": false`) ||
+		!strings.Contains(out.String(), `"delegationVerified": false`) {
+		t.Fatalf("unsafe host capability report: %s", out.String())
+	}
+	if err := run([]string{"host", "inspect", "extra"}, &out); err == nil {
+		t.Fatal("unknown host command flag accepted")
+	}
+}
+
+func TestStackImpactCLIIsReadOnly(t *testing.T) {
+	document := strings.Replace(`{"apiVersion":"goreecloud.containers/v1alpha1","kind":"Stack","metadata":{"name":"x"},"services":[{"name":"web","image":"sha256:__HASH__","replicas":1,"resources":{"cpuMilli":250,"memoryBytes":33554432},"security":{"runAsNonRoot":true,"readOnlyRootFilesystem":true,"network":"isolated"}}]}`, "__HASH__", strings.Repeat("f", 64), 1)
+	parent := t.TempDir()
+	old := filepath.Join(parent, "old.json")
+	current := filepath.Join(parent, "new.json")
+	if err := os.WriteFile(old, []byte(document), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(current, []byte(strings.Replace(document, `"replicas":1`, `"replicas":2`, 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := run([]string{"stack", "impact", old, current}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"deploymentAuthorized": false`) ||
+		!strings.Contains(output.String(), `"manualReviewRequired": true`) ||
+		!strings.Contains(output.String(), `"rollbackVerified": false`) {
+		t.Fatalf("risk assessment incorrectly authorized deployment: %s", output.String())
+	}
+	if err := run([]string{"stack", "impact", old}, &output); err == nil {
+		t.Fatal("missing target accepted")
 	}
 }
