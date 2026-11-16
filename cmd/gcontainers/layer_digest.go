@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/GoreeCloud/containers/internal/ociimage"
@@ -16,8 +17,24 @@ import (
 // image verify-layer checks a local tar or tar+gzip against a caller-pinned
 // SHA256 descriptor in one read-only parsing pass. No extraction or execution.
 func imageVerifyLayer(args []string, out io.Writer) error {
-	if len(args) != 3 {
-		return errors.New("usage: image verify-layer ABS_FILE tar|tar+gzip sha256:HEX")
+	if len(args) != 3 && len(args) != 4 {
+		return errors.New("usage: image verify-layer ABS_FILE tar|tar+gzip sha256:HEX [DESCRIPTOR_BYTES]")
+	}
+	var expectedSize int64
+	if len(args) == 4 {
+		if len(args[3]) == 0 || len(args[3]) > 20 || args[3][0] == '0' {
+			return errors.New("invalid positive descriptor size")
+		}
+		for _, digit := range args[3] {
+			if digit < '0' || digit > '9' {
+				return errors.New("invalid numeric descriptor size")
+			}
+		}
+		var err error
+		expectedSize, err = strconv.ParseInt(args[3], 10, 64)
+		if err != nil || expectedSize <= 0 || expectedSize > ociimage.MaxLayerCompressedBytes {
+			return errors.New("descriptor size outside supported bounds")
+		}
 	}
 	source := args[0]
 	if !filepath.IsAbs(source) || filepath.Clean(source) != source {
@@ -44,6 +61,9 @@ func imageVerifyLayer(args []string, out io.Writer) error {
 	if !before.Mode().IsRegular() || before.Size() < 0 || before.Size() > ociimage.MaxLayerCompressedBytes {
 		return errors.New("layer must be a bounded, nonsymlink regular file")
 	}
+	if expectedSize > 0 && before.Size() != expectedSize {
+		return errors.New("local OCI layer bytes differ from descriptor")
+	}
 	file, err := os.Open(source)
 	if err != nil {
 		return err
@@ -55,7 +75,12 @@ func imageVerifyLayer(args []string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	report, err := ociimage.VerifyLayerWithDigest(ctx, file, mode, args[2])
+	var report ociimage.VerifiedLayerReport
+	if expectedSize > 0 {
+		report, err = ociimage.VerifyLayerWithDescriptor(ctx, file, mode, args[2], expectedSize)
+	} else {
+		report, err = ociimage.VerifyLayerWithDigest(ctx, file, mode, args[2])
+	}
 	if err != nil {
 		return err
 	}

@@ -183,3 +183,5 @@ An added/removed service or changed immutable image digest now requires separate
 The combined native preflight masks image-digest identifiers in its embedded transition-impact steps, while retaining action and service labels for review. Direct stack diff/impact commands remain separate developer diagnostics and must not be treated as privacy-redacted approval records.
 
 The kernel probe now executes its own already-running executable through the Linux /proc/self/exe inode instead of reopening a replaceable user-writable executable pathname. The inert child receives the parent namespace IDs on a bounded stdin pipe and returns only booleans; even the internal helper no longer prints raw namespace inode identities. This is a reduction in probe tampering and diagnostic disclosure risk, not OCI confinement.
+
+An optional positive DESCRIPTOR_BYTES CLI argument now requires the caller-supplied OCI compressed byte size to match both the open file and exactly the bytes hashed during inspection. The response separates digest-only checks from both descriptor-size and digest checks. The descriptor and publisher remain unauthenticated and extraction is always denied.

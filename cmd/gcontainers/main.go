@@ -173,7 +173,7 @@ Usage:
   gcontainers image audit --store ABS_EXISTING_STORE_DIR
   gcontainers image verify OCI_LAYOUT_DIR
   gcontainers image inspect-layer TAR_FILE tar|tar+gzip
-  gcontainers image verify-layer ABS_TAR_FILE tar|tar+gzip sha256:EXPECTED_64_HEX
+  gcontainers image verify-layer ABS_TAR_FILE tar|tar+gzip sha256:EXPECTED_64_HEX [DESCRIPTOR_BYTES]
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
 gcontainers host inspect
   gcontainers stack validate NATIVE_STACK_JSON
