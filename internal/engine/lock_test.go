@@ -3,8 +3,11 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -97,4 +100,41 @@ func TestMutationLockRejectedOnCanceledContext(t *testing.T) {
 	if err := WithContainerLock(ctx, root, "alpha", func() error { t.Error("ran"); return nil }); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled lock accepted: %v", err)
 	}
+}
+
+// This regression exercise uses a separate copy of the Go test process, not
+// a container runtime or shell, to verify the actual cross-process flock.
+func TestOCIFileLockCrossProcess(t *testing.T) {
+	root := lockFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err := WithContainerLock(ctx, root, "shared", func() error {
+		child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestOCIFileLockHelper$")
+		child.Env = []string{"GC_LOCK_HELPER=1", "GC_LOCK_ROOT=" + root}
+		output, err := child.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("child lock test failed: %w: %s", err, output)
+		}
+		if !strings.Contains(string(output), "LOCK_BUSY_CONFIRMED") {
+			return fmt.Errorf("child did not verify cross-process exclusion: %s", output)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+func TestOCIFileLockHelper(t *testing.T) {
+	if os.Getenv("GC_LOCK_HELPER") != "1" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 125*time.Millisecond)
+	defer cancel()
+	err := WithContainerLock(ctx, os.Getenv("GC_LOCK_ROOT"), "shared", func() error {
+		return errors.New("two CLI processes entered same container mutation")
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("cross-process flock failed to exclude competing mutation: %v", err)
+	}
+	fmt.Println("LOCK_BUSY_CONFIRMED")
 }
