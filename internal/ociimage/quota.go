@@ -54,5 +54,13 @@ func (s *Store) acquireWriter(ctx context.Context, root *os.Root) (func(), error
 		case <-timer.C:
 		}
 	}
+	// A cooperating writer may have waited for another process. Recheck
+	// the lock pathname AFTER acquiring flock: otherwise unlink/replace
+	// during that wait could admit a writer on a stale inode.
+	current, err := root.Lstat(name)
+	if err != nil || !os.SameFile(current, opened) {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		return fail(errors.New("OCI store lock was replaced while waiting"))
+	}
 	return func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN); _ = file.Close() }, nil
 }
