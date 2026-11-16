@@ -41,3 +41,7 @@ The new stack diff OLD_JSON NEW_JSON command generates a deterministic, read-onl
 ## Explicit read-only host capacity budgeting
 
 The native stack capacity command accepts **caller-provided** CPU millicore, memory MiB, and max-instance envelopes; it computes declared aggregate demand, returns structured budget blockers and fails nonzero on oversubscription. It does not query live host resources, reserve cgroups, enforce limits, verify identities, resolve secrets, or authorize deployment; even an in-budget report declares deploymentAuthorized=false and requires manual review. Future real admission must inspect current host reservations, verified isolation and trusted MIPS policies before any atomic deployment.
+
+## Linux rootless host capability observation
+
+The optional host inspect command reads only fixed, size-bounded Linux proc/sysfs capability files to report the presence of cgroup v2 cpu/memory/pids controllers and unprivileged user-namespace configuration. It does not reveal usernames, paths, container names or secret data. It never invokes unshare, writes cgroup files, modifies services, verifies per-user cgroup delegation or proves namespace isolation. All reports explicitly retain deploymentAuthorized=false, delegationVerified=false and isolationVerified=false, even when every observed kernel fact appears favorable. VPS Mesh readiness must be verified separately on an authorized staging target.

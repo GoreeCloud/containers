@@ -126,3 +126,18 @@ func TestNativeStackCapacityCLI(t *testing.T) {
 		t.Fatal("missing explicit host budgets accepted")
 	}
 }
+
+func TestHostInspectionIsAdvisoryOnly(t *testing.T) {
+	var out bytes.Buffer
+	if err := run([]string{"host", "inspect"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"readOnly": true`) ||
+		!strings.Contains(out.String(), `"deploymentAuthorized": false`) ||
+		!strings.Contains(out.String(), `"delegationVerified": false`) {
+		t.Fatalf("unsafe host capability report: %s", out.String())
+	}
+	if err := run([]string{"host", "inspect", "extra"}, &out); err == nil {
+		t.Fatal("unknown host command flag accepted")
+	}
+}

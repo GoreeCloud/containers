@@ -17,6 +17,7 @@ import (
 
 	"github.com/GoreeCloud/containers/internal/bundle"
 	"github.com/GoreeCloud/containers/internal/engine"
+	"github.com/GoreeCloud/containers/internal/hostreadiness"
 	"github.com/GoreeCloud/containers/internal/stack"
 )
 
@@ -54,6 +55,25 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "oci":
 		return oci(args[1:], out)
+	case "host":
+		if len(args) != 2 || args[1] != "inspect" {
+			return errors.New("usage: gcontainers host inspect")
+		}
+		if runtime.GOOS != "linux" {
+			return errors.New("host readiness inspection supports Linux only")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		report, err := hostreadiness.Inspect(ctx, os.DirFS("/"), os.Geteuid() != 0)
+		if err != nil {
+			return err
+		}
+		payload, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(out, string(payload))
+		return err
 	case "stack":
 		if len(args) >= 3 && args[1] == "capacity" {
 			return stackCapacity(args[2:], out)
@@ -107,6 +127,7 @@ func usage(w io.Writer) error {
 	_, err := fmt.Fprintln(w, `GoreeCloud Containers 0.1.0-dev — Linux rootless OCI preview
 Usage:
   gcontainers doctor
+  gcontainers host inspect
   gcontainers stack validate NATIVE_STACK_JSON
   gcontainers stack plan NATIVE_STACK_JSON
   gcontainers stack diff OLD_STACK_JSON NEW_STACK_JSON

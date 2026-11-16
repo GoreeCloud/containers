@@ -24,6 +24,8 @@ Requires Linux and Go 1.27 or later.
 go test ./...
 go build -o gcontainers ./cmd/gcontainers
 ./gcontainers doctor
+# Read-only, non-identifying Linux kernel capabilities (not a security attestation):
+./gcontainers host inspect
 ./gcontainers stack validate examples/native-stack.json
 ./gcontainers stack plan examples/native-stack.json
 # Offline, caller-supplied host budget; this is NOT a deployment authorization:
