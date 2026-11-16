@@ -29,3 +29,7 @@ Dedicated rootless test host; kernel namespace/cgroup/LSM/seccomp experiments; m
 ## Image layout verification preview
 
 The read-only OCI layout verifier validates a bounded subset of OCI layout/index/manifest descriptor chains with SHA-256 and length checks. It refuses symlinks at directly checked paths, unsupported external URLs, oversized metadata, excessive blob count/depth, and malformed/duplicate-key JSON. **It does not unpack layers, pull images, establish signatures, prevent concurrent path replacement (TOCTOU), or certify arbitrary images as safe.** Registry operations, signed provenance, secure layer extraction, resource reservations and independent hostile-image review remain unimplemented.
+
+## Experimental private blob store
+
+The development branch adds a user-owned private local SHA-256 blob store. New bytes are streamed to a private temporary file, bounded to 512 MiB per blob, synced, hashed, and hard-linked into a digest-named path without overwriting existing blobs. Existing blobs are verified before deduplication. Explicit CLI import requires --experimental and an unprivileged Linux user. This store is **not** a secure container registry, full OCI image store, signed supply chain or artifact extraction pipeline. Directory-entry races, unsupported symlink ancestors, malicious concurrent same-user modification, quotas across multiple blobs, disk exhaustion, crash recovery and LSM enforcement remain review gates. Linux openat2 descriptor-safe traversal should be evaluated before production.
