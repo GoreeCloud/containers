@@ -2,6 +2,7 @@ package ociimage
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -52,14 +53,14 @@ func OpenStore(path string) (*Store, error) {
 			return nil, err
 		}
 	}
-	return &Store{root: path, maxBytes: maxBlobBytes}, nil
-}
-func privateStoreDir(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
+	store := &Store{root: path, maxBytes: maxBlobBytes}
+	if err := store.verifyDirectories(); err != nil {
+		return nil, err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+	return store, nil
+}
+func privateStoreInfo(info os.FileInfo) error {
+	if info == nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
 		return errors.New("image store requires a private non-symlink directory")
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
@@ -68,13 +69,51 @@ func privateStoreDir(path string) error {
 	}
 	return nil
 }
-func (s *Store) verifyDirectories() error {
-	for _, sub := range []string{"", "tmp", "blobs", "blobs/sha256"} {
-		if err := privateStoreDir(filepath.Join(s.root, sub)); err != nil {
-			return err
+func privateStoreDir(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	return privateStoreInfo(info)
+}
+
+// openRoot anchors blob operations to a verified, private directory handle.
+// The handle remains valid if the root path is renamed or replaced. It does
+// not by itself prohibit bind mounts or malicious same-user file mutations.
+func (s *Store) openRoot() (*os.Root, error) {
+	before, err := os.Lstat(s.root)
+	if err != nil {
+		return nil, err
+	}
+	if err := privateStoreInfo(before); err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(s.root)
+	if err != nil {
+		return nil, err
+	}
+	release := func(err error) (*os.Root, error) { root.Close(); return nil, err }
+	current, err := root.Lstat(".")
+	if err != nil || !os.SameFile(before, current) {
+		return release(errors.New("image store root was replaced during open"))
+	}
+	for _, sub := range []string{"tmp", "blobs", "blobs/sha256"} {
+		info, err := root.Lstat(sub)
+		if err != nil {
+			return release(err)
+		}
+		if err := privateStoreInfo(info); err != nil {
+			return release(err)
 		}
 	}
-	return nil
+	return root, nil
+}
+func (s *Store) verifyDirectories() error {
+	root, err := s.openRoot()
+	if err != nil {
+		return err
+	}
+	return root.Close()
 }
 
 // Put atomically adds verified bytes without overwriting existing content.
@@ -88,15 +127,21 @@ func (s *Store) Put(ctx context.Context, source io.Reader) (BlobInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return empty, err
 	}
-	if err := s.verifyDirectories(); err != nil {
-		return empty, err
-	}
-	temporary, err := os.CreateTemp(filepath.Join(s.root, "tmp"), ".ingest-")
+	root, err := s.openRoot()
 	if err != nil {
 		return empty, err
 	}
-	name := temporary.Name()
-	defer os.Remove(name)
+	defer root.Close()
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return empty, err
+	}
+	name := "tmp/.ingest-" + hex.EncodeToString(nonce[:])
+	temporary, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return empty, err
+	}
+	defer root.Remove(name)
 	h := sha256.New()
 	buffer := make([]byte, 32<<10)
 	var length int64
@@ -107,6 +152,10 @@ func (s *Store) Put(ctx context.Context, source io.Reader) (BlobInfo, error) {
 			return empty, err
 		}
 		count, readErr := source.Read(buffer)
+		if count < 0 || count > len(buffer) {
+			temporary.Close()
+			return empty, errors.New("invalid blob reader byte count")
+		}
 		if count > 0 {
 			idle = 0
 			length += int64(count)
@@ -143,12 +192,9 @@ func (s *Store) Put(ctx context.Context, source io.Reader) (BlobInfo, error) {
 		return empty, err
 	}
 	digest := "sha256:" + hex.EncodeToString(h.Sum(nil))
-	destination := filepath.Join(s.root, "blobs", "sha256", digest[len("sha256:"):])
+	destination := "blobs/sha256/" + digest[len("sha256:"):]
 	info := BlobInfo{Digest: digest, Size: length}
-	if err := s.verifyDirectories(); err != nil {
-		return empty, err
-	}
-	if err := os.Link(name, destination); err != nil {
+	if err := root.Link(name, destination); err != nil {
 		if !os.IsExist(err) {
 			return empty, fmt.Errorf("unable to store image blob: %w", err)
 		}
@@ -158,7 +204,7 @@ func (s *Store) Put(ctx context.Context, source io.Reader) (BlobInfo, error) {
 		}
 		return info, nil
 	}
-	directory, err := os.Open(filepath.Join(s.root, "blobs", "sha256"))
+	directory, err := root.Open("blobs/sha256")
 	if err != nil {
 		return empty, err
 	}
@@ -175,7 +221,8 @@ func (s *Store) Put(ctx context.Context, source io.Reader) (BlobInfo, error) {
 
 // Verify checks bytes against a caller-supplied immutable sha256 descriptor.
 // The caller must not treat the path or a separate post-verification open as
-// race-free. Descriptor-based storage hardening is required before deployment.
+// race-free. os.Root anchors paths and inode comparison detects many swaps,
+// but hostile same-user modification and bind mounts remain unsupported.
 func (s *Store) Verify(ctx context.Context, digest string) (int64, error) {
 	if ctx == nil {
 		return 0, errors.New("context required")
@@ -183,22 +230,31 @@ func (s *Store) Verify(ctx context.Context, digest string) (int64, error) {
 	if !digestPattern.MatchString(digest) {
 		return 0, errors.New("invalid image blob digest")
 	}
-	if err := s.verifyDirectories(); err != nil {
+	root, err := s.openRoot()
+	if err != nil {
 		return 0, err
 	}
-	path := filepath.Join(s.root, "blobs", "sha256", digest[len("sha256:"):])
-	fi, err := os.Lstat(path)
+	defer root.Close()
+	name := "blobs/sha256/" + digest[len("sha256:"):]
+	fi, err := root.Lstat(name)
 	if err != nil {
 		return 0, err
 	}
 	if !fi.Mode().IsRegular() || fi.Size() > s.maxBytes {
 		return 0, errors.New("nonregular or oversize stored blob")
 	}
-	f, err := os.Open(path)
+	f, err := root.Open(name)
 	if err != nil {
 		return 0, err
 	}
 	defer f.Close()
+	actual, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	if !os.SameFile(fi, actual) || !actual.Mode().IsRegular() {
+		return 0, errors.New("stored blob changed between metadata check and open")
+	}
 	hash := sha256.New()
 	buffer := make([]byte, 32<<10)
 	var total int64

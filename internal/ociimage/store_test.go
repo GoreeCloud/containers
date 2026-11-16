@@ -157,3 +157,31 @@ func TestStoreConcurrentSameDigest(t *testing.T) {
 		t.Fatalf("unexpected concurrent store state: %v %d", err, len(files))
 	}
 }
+
+func TestStoreRejectsReplacedBlobDirectory(t *testing.T) {
+	s := testStore(t)
+	shaDir := filepath.Join(s.root, "blobs", "sha256")
+	original := shaDir + "-retained"
+	if err := os.Rename(shaDir, original); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc", shaDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Put(context.Background(), bytes.NewReader([]byte("safe"))); err == nil {
+		t.Fatal("symlinked blob directory accepted for write")
+	}
+	if _, err := s.Verify(context.Background(), "sha256:"+strings.Repeat("a", 64)); err == nil {
+		t.Fatal("symlinked blob directory accepted for verification")
+	}
+}
+
+type illegalReader struct{}
+
+func (illegalReader) Read(p []byte) (int, error) { return len(p) + 1, nil }
+func TestStoreRejectsIllegalReaderCounts(t *testing.T) {
+	s := testStore(t)
+	if _, err := s.Put(context.Background(), illegalReader{}); err == nil {
+		t.Fatal("invalid read byte count accepted")
+	}
+}

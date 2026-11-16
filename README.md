@@ -11,7 +11,7 @@ GoreeCloud Containers is being built as the eventual default containerization so
 - `gcontainers doctor`: a read-only report of local Linux and OCI runtime prerequisites.
 - `gcontainers validate <bundle-directory>`: fail-closed parsing of a restricted rootless OCI bundle policy. Includes file-size and JSON nesting limits, duplicate-key rejection, and restrictions on host namespaces, root filesystem, capabilities, devices, hooks, writable/bind mounts, and seccomp defaults.
 - `gcontainers oci create|start|state|stop|delete`: a GoreeCloud-owned lifecycle adapter that invokes an external, replaceable OCI low-level runtime (`crun` or `runc`) directly, without Docker, Podman, containerd, a shell, or a background daemon. Mutations require `--experimental`; runtime state is stored in a private per-user directory and deletion is never forced.
-- Private local SHA-256 content-addressed blob store with bounded, atomic, deduplicated imports (requires explicit experimental confirmation; **no image unpack, registry client or container execution**).
+- Private local SHA-256 content-addressed blob store with bounded, directory-handle-anchored, atomic, deduplicated imports (requires explicit experimental confirmation; **no image unpack, registry client or container execution**).
 - Read-only OCI image-layout integrity verification: referenced SHA-256 blobs, descriptor sizes, metadata limits, no downloads or extraction. Supported OCI media types are intentionally restricted; **this is not an image store or container image engine**.
 - Standard-library-only Go code, initial unit tests and Linux CI.
 
