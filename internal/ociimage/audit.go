@@ -111,8 +111,9 @@ func (s *Store) Audit(ctx context.Context) (AuditReport, error) {
 			return empty, errors.New("image store contains unsafe or oversized blob")
 		}
 		stat, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || stat.Nlink != 1 {
-			return empty, errors.New("image blob must not be hardlinked outside store")
+		if !ok || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 ||
+			info.Mode().Perm()&0077 != 0 {
+			return empty, errors.New("committed image blob must be private, user-owned and not hardlinked")
 		}
 		if info.Size() > maxAuditTotalBytes-result.TotalBytes {
 			return empty, errors.New("store audit aggregate quota exceeded")

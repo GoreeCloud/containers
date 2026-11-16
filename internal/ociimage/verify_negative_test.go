@@ -22,6 +22,9 @@ func TestVerifyRejectsUnsafeCommittedBlobMetadata(t *testing.T) {
 	if _, err := store.Verify(context.Background(), item.Digest); err == nil {
 		t.Fatal("group-readable committed blob unexpectedly passed verification")
 	}
+	if _, err := store.Audit(context.Background()); err == nil {
+		t.Fatal("full-store audit accepted group-readable committed blob")
+	}
 	if err := os.Chmod(blob, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -31,6 +34,9 @@ func TestVerifyRejectsUnsafeCommittedBlobMetadata(t *testing.T) {
 	}
 	if _, err := store.Verify(context.Background(), item.Digest); err == nil {
 		t.Fatal("hardlinked committed blob unexpectedly passed verification")
+	}
+	if _, err := store.Audit(context.Background()); err == nil {
+		t.Fatal("full-store audit accepted hardlinked committed blob")
 	}
 	if err := os.Remove(alias); err != nil {
 		t.Fatal(err)

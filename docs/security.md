@@ -153,3 +153,5 @@ The private store Verify operation now rejects group/world-readable files, unexp
 ### Single-source native preflight
 
 The read-only native stack preflight command parses the source and target declarations once and evaluates a prior canonical SHA-256 fingerprint, old/new resource overlap and downstream dependency impact on the same in-memory values. Stale source fingerprints or over-budget declarations fail with a structured report. Even when both input checks pass, the report has deploymentAuthorized=false, liveStateVerified=false and rollbackVerified=false. The CLI never contacts running workloads or modifies an application.
+
+The full-store audit now enforces the same private ownership, no-extra-hardlink and no group/world access rules for committed blobs as individual digest verification. It fails on unsafe mode/ownership metadata rather than claiming the whole store was verified.
