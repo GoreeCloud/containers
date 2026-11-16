@@ -17,6 +17,7 @@ GoreeCloud Containers is being built as the eventual default containerization so
 - Native GoreeCloud stack JSON preview: strict, versioned schema validation and dependency-ordered, parallel-stage **dry-run plans only**, with a deterministic SHA-256 specification fingerprint (an audit identifier, not an approval). No Docker Compose engine is required; no stack apply or service deployment exists yet.
 
 - Read-only inspection of a restricted tar/tar+gzip OCI layer subset: rejects path traversal, links, devices, whiteouts, extended metadata, duplicate paths, dangerous modes, oversized entries and decompression abuse. No extraction or filesystem writes.
+- Further development safeguards: cooperative per-container cross-process CLI mutation locks, read-only full-store SHA-256 audits, and descriptor-anchored local stack declaration snapshots. None replaces isolation, signed provenance or production authorization.
 - Standard-library-only Go code, initial unit tests and Linux CI.
 
 The execution adapter is **not** yet independently security audited or exercised against real kernel isolation in this change. OCI runtimes remain required for execution; this is not a from-scratch kernel runtime. Validation reduces obvious hazards, but cannot certify an arbitrary OCI bundle as safe.
@@ -61,6 +62,7 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - [Architecture](docs/architecture.md)
 - [Security boundaries and limitations](docs/security.md)
 - [Milestones and acceptance criteria](docs/ROADMAP.md)
+- [Stable acceptance gate register — not yet passed](docs/STABILITY-GATES.md)
 - [Platform deployment precedence](docs/DEPLOYMENT-PRIORITY.md)
 - [Features and implementation evidence](docs/FEATURES.md)
 - [Product objectives](docs/OBJECTIVES.md)
