@@ -16,8 +16,9 @@ import (
 // Store manages bounded, user-private, digest-addressed bytes only.
 // It never unpacks archives, downloads images, or starts containers.
 type Store struct {
-	root     string
-	maxBytes int64
+	root          string
+	maxBytes      int64
+	maxTotalBytes int64
 }
 type BlobInfo struct {
 	Digest string
@@ -53,7 +54,7 @@ func OpenStore(path string) (*Store, error) {
 			return nil, err
 		}
 	}
-	store := &Store{root: path, maxBytes: maxBlobBytes}
+	store := &Store{root: path, maxBytes: maxBlobBytes, maxTotalBytes: maxAuditTotalBytes}
 	if err := store.verifyDirectories(); err != nil {
 		return nil, err
 	}
@@ -132,6 +133,23 @@ func (s *Store) Put(ctx context.Context, source io.Reader) (BlobInfo, error) {
 		return empty, err
 	}
 	defer root.Close()
+	unlock, err := s.acquireWriter(ctx, root)
+	if err != nil {
+		return empty, err
+	}
+	defer unlock()
+	// All cooperating writers share this lock. Review existing digest
+	// bytes and any interrupted staging BEFORE allocating a new staging file.
+	audit, err := s.Audit(ctx)
+	if err != nil {
+		return empty, fmt.Errorf("pre-import integrity assessment: %w", err)
+	}
+	if !audit.Verified || audit.OperatorReviewRequired {
+		return empty, errors.New("preexisting OCI store staging requires operator review")
+	}
+	if s.maxTotalBytes <= 0 || audit.TotalBytes > s.maxTotalBytes {
+		return empty, errors.New("OCI store aggregate quota policy invalid or exceeded")
+	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return empty, err
@@ -194,6 +212,23 @@ func (s *Store) Put(ctx context.Context, source io.Reader) (BlobInfo, error) {
 	digest := "sha256:" + hex.EncodeToString(h.Sum(nil))
 	destination := "blobs/sha256/" + digest[len("sha256:"):]
 	info := BlobInfo{Digest: digest, Size: length}
+	// Existing valid content does not consume additional storage quota.
+	// A corrupt or unsafe existing descriptor must NEVER be replaced.
+	if _, existingErr := root.Lstat(destination); existingErr == nil {
+		size, verifyErr := s.Verify(ctx, digest)
+		if verifyErr != nil || size != length {
+			return empty, errors.New("existing OCI blob fails content integrity check")
+		}
+		return info, nil
+	} else if !os.IsNotExist(existingErr) {
+		return empty, existingErr
+	}
+	// Require enough disk budget for new committed bytes. The quota covers
+	// committed blobs only; temporary ingest space is not reserved and
+	// uncooperative filesystem writers can bypass this advisory admission.
+	if length > s.maxTotalBytes-audit.TotalBytes {
+		return empty, errors.New("OCI store aggregate committed-byte quota exceeded")
+	}
 	if err := root.Link(name, destination); err != nil {
 		if !os.IsExist(err) {
 			return empty, fmt.Errorf("unable to store image blob: %w", err)
