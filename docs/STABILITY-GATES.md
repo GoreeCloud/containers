@@ -11,10 +11,10 @@ GoreeCloud Containers is the intended **first-priority container platform when i
 | Area | Verified in development | Stable gate status |
 | --- | --- | --- |
 | Go CLI, original code, bounded OCI policy | CI, tests, vet, build, selected fuzz tests | **Incomplete** — security review and OS acceptance missing |
-| OCI runtime security | Strict nonroot mapping/profile, patched version gate, minimal state parser, cooperative per-ID locks and private pending-operation journal with double-read incident consistency checks | **BLOCKED** — no actual rootless kernel confinement or recovery test |
-| OCI images | Bounded hash verification, private opaque blob store, read-only audit (including unresolved import staging) plus cooperative 1-GiB committed-blob write quota and cross-process lock exclusion test and tar/gzip preflight | **BLOCKED** — no authenticated registry, secure unpacker or signature verification |
+| OCI runtime security | Strict nonroot mapping/profile, patched version gate, minimal state parser, cooperative per-ID locks, private pending-operation journal with double-read incident consistency and fail-closed status reads | **BLOCKED** — no actual rootless kernel confinement or recovery test |
+| OCI images | Bounded hash verification, private opaque blob store, read-only audit (including unresolved import staging and unsafe ownership/permissions), private SHA-256 Verify, cooperating 1-GiB committed-blob write quota, cross-process lock test and tar/gzip preflight | **BLOCKED** — no authenticated registry, secure unpacker or signature verification |
 | Host resources | Read-only cgroup/userns capability probe; caller-supplied stack capacity math | **BLOCKED** — actual cgroup delegation and enforcement not implemented |
-| Native stack | JSON validator, dependency stages, fingerprint, read-only transition diff, dependency blast-radius, explicit old-plus-new budget and caller-supplied revision conflict checks | **BLOCKED** — executor, health checks and rollback not implemented |
+| Native stack | JSON validator, dependency stages, fingerprint, read-only transition diff, dependency blast-radius, explicit old-plus-new budget, caller-supplied revision conflict checks and combined single-source preflight | **BLOCKED** — executor, health checks and rollback not implemented |
 | MIPS systems | Boundaries documented | **BLOCKED** — no implemented/proven platform integration |
 | VPS Mesh staging | No production action from this review branch | **BLOCKED** — isolated canary, service parity, observability and recovery required |
 
