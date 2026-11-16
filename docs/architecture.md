@@ -34,6 +34,10 @@ There is no daemon, socket API, registry client, local image store, networking c
 | Scheduling | Health probes, restart policies, resource quotas, upgrades and controlled multi-host placement |
 | API and UI | GoreeCloud Identity + Mesh + GoreeShield + Wardveil; GoreeCloud UI for clients |
 
+## Engine priority and self-sufficiency
+
+Stable target: the GoreeCloud-owned engine, CLI, configuration, image and stack management are the primary deployment path. Docker/Podman engines are **optional, second-priority alternatives**, not required components. OCI interoperability is preserved as a standard, not as a mandate to install another management engine. The 0.1 preview's optional low-level OCI runtime (crun/runc) **does not yet satisfy independent native-runtime acceptance**. Future replacement or permanent isolated dependency selection is subject to M1 security review.
+
 ## Dependency strategy
 
 Use Linux kernel isolation rather than inventing a new kernel. OCI specs preserve workload portability. Maintain an abstraction for `crun` and `runc` initially; replacement or in-house low-level runtime work requires an independently audited security case and a sustained maintenance budget. No dependency on Docker or Podman is required by the initial adapter.

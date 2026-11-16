@@ -1,6 +1,6 @@
 # Migration from Docker and Podman (planning only)
 
-The founder's long-term direction is for GoreeCloud Containers to become the ecosystem default. The earlier requirement to provide Docker Compose first, followed by Podman and other deployment paths, remains the currently documented **shipping** compatibility rule until GoreeCloud Containers can demonstrably satisfy those workflows. The migration is a controlled change, not an immediate removal of established engines.
+Founder direction (November 15, 2026): after verified stable acceptance, GoreeCloud Containers is the **required default and first-priority deployment path** for GoreeCloud workloads. Docker, Docker Compose, and Podman are optional, second-priority compatibility/deployment alternatives and **must not be mandatory transitive runtime dependencies** of the stable engine. Older Docker Compose-first instructions are superseded for this target architecture. **Transitional operating rule:** existing functional Docker/Podman stacks remain in service without forced cutover until equivalent native capabilities, staging tests, data integrity, and rollback are verified. Migration is a controlled change, not an immediate removal of established engines.
 
 1. Inventory *read-only* all workloads, OCI images, Compose files, bind mounts, named volumes, networks, secrets, ports, users, restart policies, and backup/restore ownership.
 2. Define a per-workload compatibility matrix, including Compose features and unsupported flags; refuse unknown directives rather than silently ignoring them.

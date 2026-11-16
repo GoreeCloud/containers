@@ -12,6 +12,6 @@ All items after M0 are **planned**, not implemented or scheduled promises.
 | M5 — Operations API | Rootless daemon, secure local API, identity and authorization, policy hooks, audit/metrics | Fuzz/security review, resource controls, least privilege, versioned contracts |
 | M6 — Ecosystem integration | GoreeCloud Mesh, Identity, GoreeShield, Wardveil, GoreeCloud UI | Real integration, privacy/consent and security acceptance; accessible UI |
 | M7 — VPS Mesh canary | Isolated staging stack only, parallel production, rollback and migration inventory | Same features/data/health/observability under load; recovery rehearsals |
-| M8 — Conditional default | Controlled cutover for each workload with tested rollback | No user-data loss, audited security, SLA evidence, operator acceptance |
+| M8 — Verified stable default | Controlled cutover for each workload with tested rollback | No user-data loss, audited security, SLA evidence, operator acceptance |
 
-Feature design order favors isolation and reversible migration over breadth. Container/build dependencies remain replaceable. Do not call the platform a Docker/Podman replacement until M8 gates pass.
+Feature design order favors isolation and reversible migration over breadth. Container/build dependencies remain replaceable. The **stable outcome** is GoreeCloud Containers first, with optional second-priority Docker/Podman compatibility. Do not claim Docker/Podman have been replaced until M8 gates pass for each migrated workload. Cross-platform Compose compatibility is valuable but cannot gate all native workloads if the native format already provides complete independently tested capabilities.

@@ -2,7 +2,7 @@
 
 **An experimental, GoreeCloud-owned Linux container engine and management platform.**
 
-GoreeCloud Containers is being built as the eventual default containerization solution for the GoreeCloud ecosystem, with a design goal of replacing Docker and Podman management while retaining portable OCI images and Compose-compatible deployment definitions.
+GoreeCloud Containers is being built as the eventual default containerization solution for the GoreeCloud ecosystem, with a design goal of permanently replacing Docker and Podman as the default management engines after independently verified stability. Docker, Docker Compose, and Podman remain optional, second-priority compatibility paths; none is required by the intended stable GoreeCloud Containers engine.
 
 > **Status: 0.1.0-dev / experimental foundation. Not production-ready.** No Docker/Podman replacement, image pull/build, daemon, Compose execution, networking, volumes, UI, remote control, or cluster orchestration is claimed. Do not migrate production containers.
 
@@ -40,7 +40,10 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 
 - [Architecture](docs/architecture.md)
 - [Security boundaries and limitations](docs/security.md)
-- [Milestones and acceptance criteria](docs/roadmap.md)
+- [Milestones and acceptance criteria](docs/ROADMAP.md)
+- [Platform deployment precedence](docs/DEPLOYMENT-PRIORITY.md)
+- [Features and implementation evidence](docs/FEATURES.md)
+- [Product objectives](docs/OBJECTIVES.md)
 - [Docker and Podman migration strategy](docs/migration.md)
 
 ### Integration boundaries
