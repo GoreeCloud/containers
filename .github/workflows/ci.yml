@@ -42,6 +42,14 @@ jobs:
           ./gcontainers stack diff examples/native-stack.json examples/native-stack.json > "$d/diff.json"
           grep -Fq '"dryRun": true' "$d/diff.json"
           grep -Fq '"manualReviewRequired": false' "$d/diff.json"
+          ./gcontainers stack capacity examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/capacity.json"
+          grep -Fq '"withinLimits": true' "$d/capacity.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/capacity.json"
+          if ./gcontainers stack capacity examples/native-stack.json --cpu-milli 100 --memory-mib 1 --max-instances 1 > "$d/overcommit.json"; then
+            echo "Oversubscribed native stack budget must fail closed" >&2
+            exit 1
+          fi
+          grep -Fq '"withinLimits": false' "$d/overcommit.json"
           tar -C "$d" -cf "$d/layer.tar" blob
           ./gcontainers image inspect-layer "$d/layer.tar" tar > "$d/layer.json"
           grep -Fq '"fileCount": 1' "$d/layer.json"
