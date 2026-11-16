@@ -55,3 +55,21 @@ func TestVerifyLayerRejectsCorrectDigestOfHostileArchive(t *testing.T) {
 		t.Fatal("cancelled layer verification accepted")
 	}
 }
+
+func TestVerifyLayerRequiresPinnedDescriptorSizeWhenProvided(t *testing.T) {
+	raw := makeLayer(t, layerEntry{name: "file", size: 3, data: []byte("abc")})
+	digest := fmt.Sprintf("sha256:%x", sha256.Sum256(raw))
+	report, err := VerifyLayerWithDescriptor(context.Background(), bytes.NewReader(raw), MediaLayer, digest, int64(len(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.DescriptorSizeVerified || report.ExpectedDescriptorBytes != int64(len(raw)) ||
+		!report.DigestMatches || report.SourceProvenanceVerified || report.ExtractionAuthorized {
+		t.Fatalf("descriptor check overclaimed trust: %+v", report)
+	}
+	for _, bad := range []int64{0, -1, int64(len(raw) + 1), MaxLayerCompressedBytes + 1} {
+		if _, err := VerifyLayerWithDescriptor(context.Background(), bytes.NewReader(raw), MediaLayer, digest, bad); err == nil {
+			t.Fatalf("incorrect descriptor byte size %d accepted", bad)
+		}
+	}
+}

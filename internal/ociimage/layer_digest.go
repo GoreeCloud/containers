@@ -13,8 +13,11 @@ import (
 // A matching caller-supplied digest is NOT a trusted signature, rootfs,
 // secure unpack, source provenance claim or authorization to run.
 type VerifiedLayerReport struct {
-	ExpectedDigest           string      `json:"expectedDigest"`
-	CompressedBytes          int64       `json:"compressedBytes"`
+	ExpectedDigest          string `json:"expectedDigest"`
+	CompressedBytes         int64  `json:"compressedBytes"`
+	ExpectedDescriptorBytes int64  `json:"expectedDescriptorBytes,omitempty"`
+	DescriptorSizeVerified  bool   `json:"descriptorSizeVerified"`
+
 	DigestMatches            bool        `json:"digestMatches"`
 	ArchiveSubsetValid       bool        `json:"archiveSubsetValid"`
 	SourceProvenanceVerified bool        `json:"sourceProvenanceVerified"`
@@ -69,4 +72,23 @@ func VerifyLayerWithDigest(ctx context.Context, input io.Reader, media, digest s
 		DigestMatches: true, ArchiveSubsetValid: true, SourceProvenanceVerified: false,
 		ExtractionAuthorized: false, Layer: inspected,
 	}, nil
+}
+
+// VerifyLayerWithDescriptor checks exact source bytes and the expected size.
+// The caller-supplied descriptor itself is not authenticated.
+func VerifyLayerWithDescriptor(ctx context.Context, input io.Reader, media, digest string, expectedBytes int64) (VerifiedLayerReport, error) {
+	var empty VerifiedLayerReport
+	if expectedBytes <= 0 || expectedBytes > MaxLayerCompressedBytes {
+		return empty, errors.New("OCI descriptor compressed byte size out of bounds")
+	}
+	report, err := VerifyLayerWithDigest(ctx, input, media, digest)
+	if err != nil {
+		return empty, err
+	}
+	if report.CompressedBytes != expectedBytes {
+		return empty, errors.New("OCI layer compressed byte size differs from descriptor")
+	}
+	report.ExpectedDescriptorBytes = expectedBytes
+	report.DescriptorSizeVerified = true
+	return report, nil
 }

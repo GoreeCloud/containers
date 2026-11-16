@@ -79,3 +79,5 @@ The read-only full-store integrity audit now rechecks every committed blob's ope
 ### Digest-pinned offline OCI layer admission preview
 
 The new image verify-layer CLI requires a caller-provided exact SHA-256 digest, a clean absolute nonsymlink input path, and a bounded tar or tar+gzip archive. It hashes the exact compressed/source bytes in the same stream consumed by the strict archive inspector, then rechecks the pathname and file identity before returning a conservative structured report. A matching digest is NOT authenticated provenance or a signed manifest, and a structurally supported archive is NOT authorization to unpack, mount or run its contents. Whiteouts, links, devices, privilege metadata and other unsupported archive semantics remain denied.
+
+An optional positive DESCRIPTOR_BYTES CLI argument now requires the caller-supplied OCI compressed byte size to match both the open file and exactly the bytes hashed during inspection. The response separates digest-only checks from both descriptor-size and digest checks. The descriptor and publisher remain unauthenticated and extraction is always denied.

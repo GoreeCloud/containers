@@ -56,3 +56,35 @@ func TestImageVerifyLayerCLIHonorsPinnedDescriptorAndNoExtraction(t *testing.T) 
 		t.Fatal("symlink layer accepted")
 	}
 }
+
+func TestImageLayerDescriptorSizeCLIRejectsWrongBytes(t *testing.T) {
+	dir := t.TempDir()
+	var archive bytes.Buffer
+	writer := tar.NewWriter(&archive)
+	if err := writer.WriteHeader(&tar.Header{Name: "sample", Mode: 0600, Size: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "layer.tar")
+	if err := os.WriteFile(file, archive.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	digest := fmt.Sprintf("sha256:%x", sha256.Sum256(archive.Bytes()))
+	args := []string{"image", "verify-layer", file, "tar", digest, fmt.Sprint(len(archive.Bytes()))}
+	var output bytes.Buffer
+	if err := run(args, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"descriptorSizeVerified": true`) {
+		t.Fatal("descriptor size result missing")
+	}
+	for _, bad := range []string{"0", "01", "-1", "abc", fmt.Sprint(len(archive.Bytes()) + 1)} {
+		next := append([]string(nil), args...)
+		next[5] = bad
+		if err := run(next, &bytes.Buffer{}); err == nil {
+			t.Fatalf("invalid descriptor size %q accepted", bad)
+		}
+	}
+}

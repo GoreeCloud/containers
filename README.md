@@ -34,6 +34,8 @@ go build -o gcontainers ./cmd/gcontainers
 ./gcontainers image inspect-layer /path/to/layer.tar tar
 # Offline exact descriptor digest + hostile-archive structural preflight:
 ./gcontainers image verify-layer /absolute/local/layer.tar tar sha256:YOUR_VERIFIED_64_HEX_DIGEST
+# When the caller has an OCI layer descriptor, also provide its exact compressed bytes:
+./gcontainers image verify-layer /absolute/local/layer.tar tar sha256:YOUR_VERIFIED_64_HEX_DIGEST 10240
 # Optional experimental local blob import (opaque bytes only):
 ./gcontainers image import --store /home/you/private-image-store --file /path/to/blob --experimental
 ./gcontainers validate /path/to/oci-bundle
