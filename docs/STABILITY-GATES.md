@@ -11,10 +11,10 @@ GoreeCloud Containers is the intended **first-priority container platform when i
 | Area | Verified in development | Stable gate status |
 | --- | --- | --- |
 | Go CLI, original code, bounded OCI policy | CI, tests, vet, build, selected fuzz tests | **Incomplete** — security review and OS acceptance missing |
-| OCI runtime security | Strict nonroot mapping/profile, patched version gate, minimal state parser, cooperative per-ID locks and private pending-operation journal and anonymized, fail-closed incident census | **BLOCKED** — no actual rootless kernel confinement or recovery test |
-| OCI images | Bounded hash verification, private opaque blob store, read-only audit (including unresolved import staging) plus cooperative 1-GiB committed-blob write quota and tar/gzip preflight | **BLOCKED** — no authenticated registry, secure unpacker or signature verification |
+| OCI runtime security | Strict nonroot mapping/profile, patched version gate, minimal state parser, cooperative per-ID locks and private pending-operation journal with double-read incident consistency checks | **BLOCKED** — no actual rootless kernel confinement or recovery test |
+| OCI images | Bounded hash verification, private opaque blob store, read-only audit (including unresolved import staging) plus cooperative 1-GiB committed-blob write quota and cross-process lock exclusion test and tar/gzip preflight | **BLOCKED** — no authenticated registry, secure unpacker or signature verification |
 | Host resources | Read-only cgroup/userns capability probe; caller-supplied stack capacity math | **BLOCKED** — actual cgroup delegation and enforcement not implemented |
-| Native stack | JSON validator, dependency stages, fingerprint, read-only transition diff, dependency blast-radius and explicit old-plus-new budget risk estimates | **BLOCKED** — executor, health checks and rollback not implemented |
+| Native stack | JSON validator, dependency stages, fingerprint, read-only transition diff, dependency blast-radius, explicit old-plus-new budget and caller-supplied revision conflict checks | **BLOCKED** — executor, health checks and rollback not implemented |
 | MIPS systems | Boundaries documented | **BLOCKED** — no implemented/proven platform integration |
 | VPS Mesh staging | No production action from this review branch | **BLOCKED** — isolated canary, service parity, observability and recovery required |
 
@@ -35,6 +35,7 @@ GoreeCloud Containers is the intended **first-priority container platform when i
 
 - [ ] Real rootless network isolation, default-deny service connectivity, private named volumes, cgroup CPU/memory/PID enforcement and restart/recovery testing.
 - [ ] Native stack apply, health/readiness ordering, secrets via GoreeCloud Identity and GoreeShield, deployment locks, transactional updates and rollback.
+- [ ] A future native executor must independently compare the authenticated **running** stack generation under its own exclusive lock; an offline source declaration fingerprint match is not live reconciliation or deployment consent.
 - [ ] Optional Docker/Compose/Podman import and compatibility adapters after native core stability; no external engine must be required for native operations.
 
 ### M5–M8 — Platform and cutover

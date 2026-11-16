@@ -65,6 +65,19 @@ jobs:
           grep -Fq '"dryRun": true' "$d/plan.json"
           grep -Fq '"specSHA256": "sha256:' "$d/plan.json"
           grep -Fq '"independentServices": [' "$d/plan.json"
+          source_sha="$(sed -nE 's/^[[:space:]]*"specSHA256": "(sha256:[0-9a-f]{64})".*/\1/p' "$d/plan.json")"
+          test "${#source_sha}" -eq 71
+          ./gcontainers stack revision-check examples/native-stack.json examples/native-stack.json --expected-current-sha256 "$source_sha" > "$d/revision-match.json"
+          grep -Fq '"matchesExpected": true' "$d/revision-match.json"
+          grep -Fq '"liveStateVerified": false' "$d/revision-match.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/revision-match.json"
+          stale_sha="sha256:$(printf '%064d' 0)"
+          if ./gcontainers stack revision-check examples/native-stack.json examples/native-stack.json --expected-current-sha256 "$stale_sha" > "$d/revision-stale.json" 2>/dev/null; then
+            echo "Stale native stack source revision unexpectedly accepted" >&2
+            exit 1
+          fi
+          grep -Fq '"matchesExpected": false' "$d/revision-stale.json"
+          grep -Fq '"manualReviewRequired": true' "$d/revision-stale.json"
           ./gcontainers stack diff examples/native-stack.json examples/native-stack.json > "$d/diff.json"
           grep -Fq '"dryRun": true' "$d/diff.json"
           grep -Fq '"manualReviewRequired": false' "$d/diff.json"
