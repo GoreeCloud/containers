@@ -40,8 +40,7 @@ jobs:
           grep -Fq '"blobCount": 1' "$d/audit.json"
           grep -Fq '"sourceProvenanceVerified": false' "$d/audit.json"
           grep -Fq '"operatorReviewRequired": false' "$d/audit.json"
-          printf 'unresolved synthetic bytes
-' > "$d/store/tmp/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          printf '%s' 'unresolved synthetic bytes' > "$d/store/tmp/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           if ./gcontainers image audit --store "$d/store" > "$d/audit-pending.json" 2>/dev/null; then
             echo "Unresolved OCI import staging must be a failing audit" >&2
             exit 1
