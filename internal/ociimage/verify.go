@@ -139,6 +139,9 @@ func readObject(root *os.Root, relative string, max int64) (map[string]json.RawM
 	if int64(len(blob)) > max || int64(len(blob)) != fi.Size() {
 		return nil, errors.New("OCI metadata size changed during read")
 	}
+	if err := verifyLayoutReadIdentity(root, file, fi, relative); err != nil {
+		return nil, err
+	}
 	return decodeObject(blob)
 }
 func decodeObject(blob []byte) (map[string]json.RawMessage, error) {
@@ -382,11 +385,23 @@ func (v *verifier) visit(d descriptor, depth int) error {
 	var snapshot bytes.Buffer
 	buffer := make([]byte, 32<<10)
 	var count int64
+	stalled := 0
 	for {
 		if err := v.ctx.Err(); err != nil {
 			return err
 		}
 		n, readErr := file.Read(buffer)
+		if n < 0 || n > len(buffer) {
+			return errors.New("OCI blob reader returned invalid count")
+		}
+		if n == 0 && readErr == nil {
+			stalled++
+			if stalled > 100 {
+				return io.ErrNoProgress
+			}
+		} else {
+			stalled = 0
+		}
 		if n > 0 {
 			count += int64(n)
 			if count > d.Size {
@@ -410,6 +425,10 @@ func (v *verifier) visit(d descriptor, depth int) error {
 		return errors.New("OCI blob digest or size mismatch")
 	}
 
+	if err := verifyLayoutReadIdentity(v.root, file, fi, relative); err != nil {
+		return err
+	}
+
 	v.visited[key] = d
 	v.report.VerifiedBlobs++
 	v.report.VerifiedBytes += count
@@ -426,4 +445,24 @@ func (v *verifier) visit(d descriptor, depth int) error {
 		return v.index(child, depth)
 	}
 	return v.manifest(child, depth)
+}
+
+// verifyLayoutReadIdentity checks the opened descriptor and anchored pathname
+// after consuming bytes, not only before opening the file. This reduces
+// replacement/symlink races, but is not an immutable filesystem snapshot.
+func verifyLayoutReadIdentity(root *os.Root, file *os.File, before os.FileInfo, name string) error {
+	if root == nil || file == nil || before == nil {
+		return errors.New("OCI read identity requires file and root")
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	after, err := root.Lstat(name)
+	if err != nil || !os.SameFile(before, opened) || !os.SameFile(opened, after) ||
+		!opened.Mode().IsRegular() || !after.Mode().IsRegular() ||
+		before.Size() != opened.Size() || before.Size() != after.Size() {
+		return errors.New("OCI descriptor path or content length changed during verification")
+	}
+	return nil
 }

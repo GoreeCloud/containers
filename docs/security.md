@@ -81,3 +81,7 @@ The read-only full-store integrity audit now rechecks every committed blob's ope
 The new image verify-layer CLI requires a caller-provided exact SHA-256 digest, a clean absolute nonsymlink input path, and a bounded tar or tar+gzip archive. It hashes the exact compressed/source bytes in the same stream consumed by the strict archive inspector, then rechecks the pathname and file identity before returning a conservative structured report. A matching digest is NOT authenticated provenance or a signed manifest, and a structurally supported archive is NOT authorization to unpack, mount or run its contents. Whiteouts, links, devices, privilege metadata and other unsupported archive semantics remain denied.
 
 An optional positive DESCRIPTOR_BYTES CLI argument now requires the caller-supplied OCI compressed byte size to match both the open file and exactly the bytes hashed during inspection. The response separates digest-only checks from both descriptor-size and digest checks. The descriptor and publisher remain unauthenticated and extraction is always denied.
+
+### Post-read identity verification for full OCI image layouts
+
+The read-only OCI layout verifier now rechecks every metadata and blob file's anchored pathname, inode and byte length after consuming it, and bounds repeated zero-progress reads. Deterministic regressions replace an opened blob with a same-length new inode, alter metadata length, and substitute a symlink. This does not freeze a filesystem, verify publisher signatures, or eliminate malicious same-user writes after inspection.
