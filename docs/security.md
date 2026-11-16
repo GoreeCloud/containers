@@ -155,3 +155,7 @@ The private store Verify operation now rejects group/world-readable files, unexp
 The read-only native stack preflight command parses the source and target declarations once and evaluates a prior canonical SHA-256 fingerprint, old/new resource overlap and downstream dependency impact on the same in-memory values. Stale source fingerprints or over-budget declarations fail with a structured report. Even when both input checks pass, the report has deploymentAuthorized=false, liveStateVerified=false and rollbackVerified=false. The CLI never contacts running workloads or modifies an application.
 
 The full-store audit now enforces the same private ownership, no-extra-hardlink and no group/world access rules for committed blobs as individual digest verification. It fails on unsafe mode/ownership metadata rather than claiming the whole store was verified.
+
+### Post-acquisition OCI lock identity check
+
+The private per-container cooperative lock now checks its pathname inode, owner and private permissions **after** acquiring the filesystem flock, not only before waiting. This catches a replaced lock pathname during a competing operation's wait. Direct OCI runtime invocations, hostile same-user lock replacement after the check and real kernel process supervision remain unverified and cannot be treated as solved.
