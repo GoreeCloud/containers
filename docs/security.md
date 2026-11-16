@@ -75,3 +75,7 @@ The source-only native preflight counts (but does not name or resolve) services 
 An added/removed service or changed immutable image digest now requires separate Wardveil source/provenance and GoreeShield privacy reviews, recorded as unverified offline gates. The report includes only the affected service count, never the image digest or registry name. An in-budget, correct-revision declaration with changed images still fails preflight. This does NOT query the image store, verify a signed manifest, grant an approval or authorize a rollout.
 
 The combined native preflight masks image-digest identifiers in its embedded transition-impact steps, while retaining action and service labels for review. Direct stack diff/impact commands remain separate developer diagnostics and must not be treated as privacy-redacted approval records.
+
+### Operator grant is a required native transition gate
+
+Even a source-valid, in-budget change to replicas, dependencies or other nonsecret application fields now fails the offline native preflight until a future GoreeCloud Identity operator authorization exists. The source-only tool reports goreeCloudIdentityReviewRequired=true and mipsAuthorizationVerified=false; it never grants, fetches or assumes an Identity token. A no-op input may pass offline checks but still cannot authorize a deployment.

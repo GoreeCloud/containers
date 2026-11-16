@@ -89,6 +89,14 @@ func ReviewPreflight(before, after Spec, expected string, budget ResourceBudget)
 		result.ManualReviewRequired = true
 		result.Blockers = append(result.Blockers, "image reference changes require Wardveil source/provenance and GoreeShield privacy review")
 	}
+	// Any real stack change needs an authenticated GoreeCloud Identity
+	// operator grant. Offline source/budget checks never supply that grant.
+	if len(impact.Changes) > 0 && !result.GoreeCloudIdentityReviewRequired {
+		result.GoreeCloudIdentityReviewRequired = true
+		result.ManualReviewRequired = true
+		result.Blockers = append(result.Blockers,
+			"native stack changes require GoreeCloud Identity operator authorization")
+	}
 	result.MIPSAuthorizationVerified = false
 	return result, nil
 }
