@@ -5,7 +5,8 @@
 | First-party Go command-line prototype | Development | cmd/gcontainers; Linux CI |
 | OCI bundle policy validation | Development | internal/bundle; no guarantee of isolation |
 | OCI lifecycle adapter via crun/runc | Development | internal/engine; real kernel runtime acceptance open |
-| Rootless image store and OCI registry support | Planned | M2: no production image pull/build |
+| Read-only OCI image layout integrity verifier | Development | M2 preview; hashes referenced blobs, rejects external references and malformed layouts; no unpack/import/pull |
+| Writable rootless image store and OCI registry support | Planned | M2: no production image pull/build |
 | Rootless network, volumes and cgroups | Planned | M3 |
 | Native GoreeCloud stack format and runner | Planned | M4; not merely a Docker Compose wrapper |
 | Optional Docker Compose import/compatibility | Planned | M4, second priority to native stack |

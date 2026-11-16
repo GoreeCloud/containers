@@ -16,6 +16,7 @@ import (
 
 	"github.com/GoreeCloud/containers/internal/bundle"
 	"github.com/GoreeCloud/containers/internal/engine"
+	"github.com/GoreeCloud/containers/internal/ociimage"
 )
 
 const version = "0.1.0-dev"
@@ -52,6 +53,22 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "oci":
 		return oci(args[1:], out)
+	case "image":
+		if len(args) != 3 || args[1] != "verify" {
+			return errors.New("usage: gcontainers image verify OCI_LAYOUT_DIR")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		r, err := ociimage.VerifyLayout(ctx, args[2])
+		if err != nil {
+			return err
+		}
+		b, err := json.MarshalIndent(r, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(out, string(b))
+		return err
 	default:
 		return errors.New("unknown command (try help)")
 	}
@@ -60,6 +77,7 @@ func usage(w io.Writer) error {
 	_, err := fmt.Fprintln(w, `GoreeCloud Containers 0.1.0-dev — Linux rootless OCI preview
 Usage:
   gcontainers doctor
+  gcontainers image verify OCI_LAYOUT_DIR
   gcontainers validate BUNDLE_DIRECTORY
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
   gcontainers oci start|stop|delete --id NAME --experimental

@@ -24,7 +24,7 @@ func TestReadOnlyCommands(t *testing.T) {
 }
 func TestInvalidInput(t *testing.T) {
 	for _, args := range [][]string{
-		{"validate"}, {"validate", "not-a-bundle"}, {"unknown"},
+		{"validate"}, {"image"}, {"image", "verify", "missing"}, {"validate", "not-a-bundle"}, {"unknown"},
 		{"oci", "unknown"}, {"oci", "create", "--id", "../bad", "--experimental"},
 	} {
 		if err := run(args, &bytes.Buffer{}); err == nil {
