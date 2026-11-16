@@ -195,3 +195,17 @@ func TestHostInspectionIsAdvisoryOnly(t *testing.T) {
 		t.Fatal("unknown host command flag accepted")
 	}
 }
+
+func TestAuditCLINeverCreatesAnImageStore(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-store")
+	var out bytes.Buffer
+	if err := run([]string{"image", "audit", "--store", missing}, &out); err == nil {
+		t.Fatal("missing image store accepted")
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatal("read-only audit created a directory")
+	}
+	if err := run([]string{"image", "audit", "--store"}, &out); err == nil {
+		t.Fatal("missing path accepted")
+	}
+}

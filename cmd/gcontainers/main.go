@@ -130,6 +130,7 @@ func usage(w io.Writer) error {
 	_, err := fmt.Fprintln(w, `GoreeCloud Containers 0.1.0-dev — Linux rootless OCI preview
 Usage:
   gcontainers doctor
+  gcontainers image audit --store ABS_EXISTING_STORE_DIR
   gcontainers image verify OCI_LAYOUT_DIR
   gcontainers image inspect-layer TAR_FILE tar|tar+gzip
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
@@ -273,6 +274,24 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) == 3 && args[0] == "audit" && args[1] == "--store" {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		store, err := ociimage.OpenExistingStore(args[2])
+		if err != nil {
+			return err
+		}
+		report, err := store.Audit(ctx)
+		if err != nil {
+			return err
+		}
+		result, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(out, string(result))
+		return err
+	}
 	if len(args) == 3 && args[0] == "inspect-layer" {
 		media := ""
 		switch args[2] {
@@ -323,7 +342,7 @@ func imageCommand(args []string, out io.Writer) error {
 		return err
 	}
 	if len(args) == 0 || args[0] != "import" {
-		return errors.New("usage: image verify OCI_LAYOUT_DIR | image import --store ABS_DIR --file ABS_BLOB --experimental")
+		return errors.New("usage: image audit --store ABS_EXISTING_STORE_DIR | image verify OCI_LAYOUT_DIR | image import --store ABS_DIR --file ABS_BLOB --experimental")
 	}
 	if runtime.GOOS != "linux" || os.Geteuid() == 0 {
 		return errors.New("image import requires an unprivileged Linux user")
