@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,17 +94,20 @@ func Probe(ctx context.Context, executable string) (Report, error) {
 		GidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getegid(), Size: 1}},
 		GidMappingsEnableSetgroups: false, Pdeathsig: syscall.SIGKILL, Setpgid: true,
 	}
-	bytes, err := cmd.Output()
+	output := &boundedProbeOutput{}
+	cmd.Stdout = output
+	cmd.Stderr = io.Discard
+	err = cmd.Run()
 	if err != nil {
 		report.Findings = append(report.Findings, "kernel namespace child denied or unavailable")
 		return report, nil
 	}
-	if len(bytes) == 0 || len(bytes) > 4096 {
+	if len(output.data) == 0 || output.truncated {
 		report.Findings = append(report.Findings, "invalid bounded child response")
 		return report, nil
 	}
 	var child snapshot
-	if err := json.Unmarshal(bytes, &child); err != nil {
+	if err := json.Unmarshal(output.data, &child); err != nil {
 		report.Findings = append(report.Findings, "invalid isolated child response")
 		return report, nil
 	}
@@ -113,4 +117,27 @@ func Probe(ctx context.Context, executable string) (Report, error) {
 		report.Findings = append(report.Findings, "not all requested namespaces were distinct")
 	}
 	return report, nil
+}
+
+// boundedProbeOutput never retains more than 4 KiB of a child process's
+// stdout, including when a replaced executable unexpectedly emits more.
+type boundedProbeOutput struct {
+	data      []byte
+	truncated bool
+}
+
+func (w *boundedProbeOutput) Write(p []byte) (int, error) {
+	size := len(p)
+	remaining := 4096 - len(w.data)
+	if remaining > 0 {
+		count := size
+		if count > remaining {
+			count = remaining
+		}
+		w.data = append(w.data, p[:count]...)
+	}
+	if size > remaining {
+		w.truncated = true
+	}
+	return size, nil
 }
