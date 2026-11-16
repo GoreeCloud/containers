@@ -197,3 +197,7 @@ The real OCI adapter now uses a wrapper that rechecks the root-owned executable 
 ### Post-read identity verification for full OCI image layouts
 
 The read-only OCI layout verifier now rechecks every metadata and blob file's anchored pathname, inode and byte length after consuming it, and bounds repeated zero-progress reads. Deterministic regressions replace an opened blob with a same-length new inode, alter metadata length, and substitute a symlink. This does not freeze a filesystem, verify publisher signatures, or eliminate malicious same-user writes after inspection.
+
+### Post-read stack declaration identity guard
+
+Native stack source loading now rechecks the open file inode, anchored pathname, regular-file type and byte count immediately after reading and before parsing. Tests simulate same-size replacement, in-place resize and a symlink swap. This reduces source pathname races but does not certify persistent filesystem snapshots or live running-state freshness.
