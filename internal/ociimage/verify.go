@@ -46,7 +46,7 @@ type descriptor struct {
 }
 type verifier struct {
 	ctx     context.Context
-	base    string
+	root    *os.Root
 	report  Report
 	visited map[string]descriptor
 	busy    map[string]bool
@@ -57,19 +57,36 @@ func VerifyLayout(ctx context.Context, base string) (Report, error) {
 	if ctx == nil {
 		return empty, errors.New("context required")
 	}
-	root, err := filepath.Abs(base)
+	if err := ctx.Err(); err != nil {
+		return empty, err
+	}
+	rootPath, err := filepath.Abs(base)
 	if err != nil {
 		return empty, err
 	}
-	if err := regularDir(root); err != nil {
+	if err := regularDir(rootPath); err != nil {
 		return empty, fmt.Errorf("image root: %w", err)
 	}
+	before, err := os.Lstat(rootPath)
+	if err != nil {
+		return empty, err
+	}
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return empty, err
+	}
+	defer root.Close()
+	opened, err := root.Lstat(".")
+	if err != nil || !os.SameFile(before, opened) {
+		return empty, errors.New("OCI layout root changed while opening")
+	}
 	for _, name := range []string{"blobs", "blobs/sha256"} {
-		if err := regularDir(filepath.Join(root, name)); err != nil {
-			return empty, fmt.Errorf("image blobs directory: %w", err)
+		fi, err := root.Lstat(name)
+		if err != nil || !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
+			return empty, errors.New("OCI layout blob directories must not be symlinks")
 		}
 	}
-	layout, err := readObject(filepath.Join(root, "oci-layout"), 4096)
+	layout, err := readObject(root, "oci-layout", 4096)
 	if err != nil {
 		return empty, fmt.Errorf("OCI layout marker: %w", err)
 	}
@@ -77,16 +94,17 @@ func VerifyLayout(ctx context.Context, base string) (Report, error) {
 	if err != nil || version != "1.0.0" {
 		return empty, errors.New("unsupported OCI layout version")
 	}
-	index, err := readObject(filepath.Join(root, "index.json"), maxMetadataBytes)
+	index, err := readObject(root, "index.json", maxMetadataBytes)
 	if err != nil {
 		return empty, fmt.Errorf("OCI index: %w", err)
 	}
-	v := &verifier{ctx: ctx, base: root, visited: map[string]descriptor{}, busy: map[string]bool{}}
+	v := &verifier{ctx: ctx, root: root, visited: map[string]descriptor{}, busy: map[string]bool{}}
 	if err := v.index(index, 0); err != nil {
 		return empty, err
 	}
 	return v.report, nil
 }
+
 func regularDir(path string) error {
 	fi, err := os.Lstat(path)
 	if err != nil {
@@ -97,35 +115,43 @@ func regularDir(path string) error {
 	}
 	return nil
 }
-func readObject(path string, max int64) (map[string]json.RawMessage, error) {
-	fi, err := os.Lstat(path)
+func readObject(root *os.Root, relative string, max int64) (map[string]json.RawMessage, error) {
+	fi, err := root.Lstat(relative)
 	if err != nil {
 		return nil, err
 	}
 	if !fi.Mode().IsRegular() || fi.Size() > max {
-		return nil, errors.New("nonregular or oversize metadata")
+		return nil, errors.New("nonregular or oversize OCI metadata")
 	}
-	f, err := os.Open(path)
+	file, err := root.Open(relative)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, max+1))
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(fi, opened) || !opened.Mode().IsRegular() {
+		return nil, errors.New("OCI metadata file replaced while opening")
+	}
+	blob, err := io.ReadAll(io.LimitReader(file, max+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(b)) > max {
-		return nil, errors.New("metadata too large")
+	if int64(len(blob)) > max || int64(len(blob)) != fi.Size() {
+		return nil, errors.New("OCI metadata size changed during read")
 	}
-	if err := uniqueJSON(b); err != nil {
-		return nil, err
-	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(b, &object); err != nil || object == nil {
-		return nil, errors.New("invalid JSON object")
-	}
-	return object, nil
+	return decodeObject(blob)
 }
+func decodeObject(blob []byte) (map[string]json.RawMessage, error) {
+	if err := uniqueJSON(blob); err != nil {
+		return nil, err
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(blob, &obj); err != nil || obj == nil {
+		return nil, errors.New("invalid OCI JSON object")
+	}
+	return obj, nil
+}
+
 func uniqueJSON(b []byte) error {
 	d := json.NewDecoder(bytes.NewReader(b))
 	if err := walk(d, 0); err != nil {
@@ -331,59 +357,68 @@ func (v *verifier) visit(d descriptor, depth int) error {
 	if v.report.VerifiedBlobs >= maxDescriptors || v.report.VerifiedBytes+d.Size > maxTotalBytes {
 		return errors.New("OCI verification quota exceeded")
 	}
-	path := filepath.Join(v.base, "blobs", "sha256", d.Digest[len("sha256:"):])
-	fi, err := os.Lstat(path)
+	relative := "blobs/sha256/" + d.Digest[len("sha256:"):]
+	fi, err := v.root.Lstat(relative)
 	if err != nil {
 		return fmt.Errorf("missing OCI blob: %w", err)
 	}
 	if !fi.Mode().IsRegular() || fi.Size() != d.Size {
 		return errors.New("OCI blob is nonregular or descriptor size differs")
 	}
-	file, err := os.Open(path)
+	metadata := d.Media == MediaManifest || d.Media == MediaIndex
+	if metadata && d.Size > maxMetadataBytes {
+		return errors.New("OCI manifest/index metadata too large")
+	}
+	file, err := v.root.Open(relative)
 	if err != nil {
 		return err
 	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(fi, opened) || !opened.Mode().IsRegular() {
+		return errors.New("OCI blob changed between metadata check and open")
+	}
 	h := sha256.New()
-	buf := make([]byte, 32<<10)
+	var snapshot bytes.Buffer
+	buffer := make([]byte, 32<<10)
 	var count int64
 	for {
 		if err := v.ctx.Err(); err != nil {
-			file.Close()
 			return err
 		}
-		n, readErr := file.Read(buf)
+		n, readErr := file.Read(buffer)
 		if n > 0 {
 			count += int64(n)
-			h.Write(buf[:n])
+			if count > d.Size {
+				return errors.New("OCI blob grew during verification")
+			}
+			h.Write(buffer[:n])
+			// Snapshot index/manifest bytes while hashing the SAME opened
+			// descriptor, avoiding a second pathname read and TOCTOU gap.
+			if metadata {
+				snapshot.Write(buffer[:n])
+			}
 		}
 		if readErr == io.EOF {
 			break
 		}
 		if readErr != nil {
-			file.Close()
 			return readErr
 		}
-		if count > d.Size {
-			file.Close()
-			return errors.New("OCI blob grew during verification")
-		}
 	}
-	file.Close()
 	if count != d.Size || hex.EncodeToString(h.Sum(nil)) != d.Digest[len("sha256:"):] {
 		return errors.New("OCI blob digest or size mismatch")
 	}
+
 	v.visited[key] = d
 	v.report.VerifiedBlobs++
 	v.report.VerifiedBytes += count
 	if d.Media != MediaManifest && d.Media != MediaIndex {
 		return nil
 	}
-	if d.Size > maxMetadataBytes {
-		return errors.New("OCI manifest/index metadata too large")
-	}
 	v.busy[key] = true
 	defer delete(v.busy, key)
-	child, err := readObject(path, maxMetadataBytes)
+	child, err := decodeObject(snapshot.Bytes())
 	if err != nil {
 		return err
 	}

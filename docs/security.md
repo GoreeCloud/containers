@@ -41,3 +41,7 @@ Local store operations now use an os.Root directory handle to anchor temporary w
 ## Read-only layer preflight
 
 The development layer inspector parses a restricted tar or gzip-compressed tar subset with explicit entry count, input size and total uncompressed size limits. It rejects traversal, absolute paths, hard/symbolic links, device nodes, special permissions, duplicated or conflicting paths, whiteouts and PAX metadata. This **does not unpack, apply OCI whiteouts, support zstd, verify registry provenance or certify images as safe**. Unsupported valid OCI features intentionally fail closed pending a secure extractor, audited semantics, and isolated host acceptance.
+
+## OCI layout descriptor-anchored verification
+
+The read-only verifier now opens the OCI layout through a directory handle (os.Root) and rejects symlinked layout roots, blob directories, metadata and blob entries. It checks opened file identity against the file it validated, and snapshots index/manifest bytes **while hashing those same bytes** rather than reopening a mutable manifest path. This reduces symlink and between-read TOCTOU exposures; it does **not** defeat bind mounts, concurrent mutation of an opened regular file by the same account, or supply-chain signature forgery. OCI verification is integrity checking, not malware scanning or permission to execute.
