@@ -37,3 +37,7 @@ Native stack plans now group independent services into dependency-safe parallel 
 ## Proposed stack transitions (development only)
 
 The new stack diff OLD_JSON NEW_JSON command generates a deterministic, read-only change proposal. It orders additions by target dependency and removals in reverse original dependency order; any add, replace or removal requires manual review and future data/rollback acceptance. This **does not perform any migration** or imply that native deployment execution, rollback, secret resolution, network isolation, storage preservation or production admission is implemented.
+
+## Explicit read-only host capacity budgeting
+
+The native stack capacity command accepts **caller-provided** CPU millicore, memory MiB, and max-instance envelopes; it computes declared aggregate demand, returns structured budget blockers and fails nonzero on oversubscription. It does not query live host resources, reserve cgroups, enforce limits, verify identities, resolve secrets, or authorize deployment; even an in-budget report declares deploymentAuthorized=false and requires manual review. Future real admission must inspect current host reservations, verified isolation and trusted MIPS policies before any atomic deployment.
