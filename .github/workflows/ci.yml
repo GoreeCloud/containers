@@ -34,6 +34,11 @@ jobs:
           printf 'synthetic OCI blob only\n' > "$d/blob"
           ./gcontainers image import --store "$d/store" --file "$d/blob" --experimental > "$d/import.json"
           grep -Fq '"Digest": "sha256:' "$d/import.json"
+          ./gcontainers host inspect > "$d/host.json"
+          grep -Fq '"readOnly": true' "$d/host.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/host.json"
+          grep -Fq '"delegationVerified": false' "$d/host.json"
+          grep -Fq '"isolationVerified": false' "$d/host.json"
           ./gcontainers stack validate examples/native-stack.json
           ./gcontainers stack plan examples/native-stack.json > "$d/plan.json"
           grep -Fq '"dryRun": true' "$d/plan.json"
