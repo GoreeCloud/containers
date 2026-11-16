@@ -70,20 +70,32 @@ No images, networking, Compose or production deployment is implemented yet.`)
 }
 func doctor(w io.Writer) error {
 	uid := os.Geteuid()
-	_, crunErr := exec.LookPath("crun")
-	_, runcErr := exec.LookPath("runc")
+	crunPath, crunErr := exec.LookPath("crun")
+	runcPath, runcErr := exec.LookPath("runc")
+	crunEligible := false
+	runcEligible := false
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	defer cancel()
+	if crunErr == nil && engine.CheckInstalledRuntime(ctx, crunPath) == nil {
+		crunEligible = true
+	}
+	if runcErr == nil && engine.CheckInstalledRuntime(ctx, runcPath) == nil {
+		runcEligible = true
+	}
 	_, cgErr := os.Stat("/sys/fs/cgroup/cgroup.controllers")
 	info := map[string]any{
-		"product":             "GoreeCloud Containers",
-		"version":             version,
-		"os":                  runtime.GOOS,
-		"arch":                runtime.GOARCH,
-		"rootless_user":       uid != 0,
-		"cgroup_v2_present":   cgErr == nil,
-		"crun_present":        crunErr == nil,
-		"runc_present":        runcErr == nil,
-		"xdg_runtime_dir_set": os.Getenv("XDG_RUNTIME_DIR") != "",
-		"production_ready":    false,
+		"product":                    "GoreeCloud Containers",
+		"version":                    version,
+		"os":                         runtime.GOOS,
+		"arch":                       runtime.GOARCH,
+		"rootless_user":              uid != 0,
+		"cgroup_v2_present":          cgErr == nil,
+		"crun_present":               crunErr == nil,
+		"runc_present":               runcErr == nil,
+		"crun_security_baseline_met": crunEligible,
+		"runc_security_baseline_met": runcEligible,
+		"xdg_runtime_dir_set":        os.Getenv("XDG_RUNTIME_DIR") != "",
+		"production_ready":           false,
 	}
 	b, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
