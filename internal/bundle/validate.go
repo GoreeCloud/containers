@@ -77,49 +77,55 @@ type Mount struct {
 	Options     []string `json:"options"`
 }
 
+// Validate checks the restricted bundle profile without running a container.
+func Validate(dir string) error { _, err := Load(dir); return err }
+
 // Validate reads no more than 1 MiB and never executes a bundle.
-func Validate(dir string) error {
+func Load(dir string) (*Spec, error) {
 	bundleDir, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		return fmt.Errorf("bundle directory: %w", err)
+		return nil, fmt.Errorf("bundle directory: %w", err)
 	}
 	fi, err := os.Stat(bundleDir)
 	if err != nil || !fi.IsDir() {
-		return errors.New("bundle must be a directory")
+		return nil, errors.New("bundle must be a directory")
 	}
 	path := filepath.Join(bundleDir, "config.json")
 	info, err := os.Lstat(path)
 	if err != nil {
-		return fmt.Errorf("OCI config: %w", err)
+		return nil, fmt.Errorf("OCI config: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return errors.New("OCI config must be a regular file (not a symlink)")
+		return nil, errors.New("OCI config must be a regular file (not a symlink)")
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("OCI config: %w", err)
+		return nil, fmt.Errorf("OCI config: %w", err)
 	}
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, MaxConfigBytes+1))
 	if err != nil {
-		return errors.New("unable to read OCI config")
+		return nil, errors.New("unable to read OCI config")
 	}
 	if len(b) > MaxConfigBytes {
-		return errors.New("OCI config exceeds 1 MiB limit")
+		return nil, errors.New("OCI config exceeds 1 MiB limit")
 	}
 	if err := rejectDuplicateKeys(b); err != nil {
-		return fmt.Errorf("OCI JSON: %w", err)
+		return nil, fmt.Errorf("OCI JSON: %w", err)
 	}
 	var spec Spec
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&spec); err != nil {
-		return fmt.Errorf("unsupported or invalid OCI config: %w", err)
+		return nil, fmt.Errorf("unsupported or invalid OCI config: %w", err)
 	}
 	if err := d.Decode(new(any)); err != io.EOF {
-		return errors.New("OCI config has trailing data")
+		return nil, errors.New("OCI config has trailing data")
 	}
-	return validateSpec(&spec, bundleDir)
+	if err := validateSpec(&spec, bundleDir); err != nil {
+		return nil, err
+	}
+	return &spec, nil
 }
 
 func validateSpec(s *Spec, dir string) error {
@@ -131,6 +137,9 @@ func validateSpec(s *Spec, dir string) error {
 	}
 	if s.Process.Terminal || !s.Process.NoNewPrivileges || len(s.Process.Args) == 0 || s.Process.Args[0] == "" {
 		return errors.New("noninteractive process, arguments and noNewPrivileges=true required")
+	}
+	if err := validateProcess(s.Process); err != nil {
+		return err
 	}
 	c := s.Process.Capabilities
 	if c == nil || len(c.Bounding)+len(c.Effective)+len(c.Inheritable)+len(c.Permitted)+len(c.Ambient) != 0 {
@@ -368,4 +377,66 @@ func walkJSON(d *json.Decoder, depth int) error {
 		return errors.New("invalid JSON delimiter")
 	}
 	return err
+}
+
+// validateProcess bounds mutable process metadata in the strict preview
+// profile. It does not certify a root filesystem or syscall allowlist.
+func validateProcess(p *Process) error {
+	if len(p.Args) > 64 || !strings.HasPrefix(p.Args[0], "/") || filepath.Clean(p.Args[0]) != p.Args[0] {
+		return errors.New("preview process requires clean absolute executable and at most 64 arguments")
+	}
+	total := 0
+	for _, arg := range p.Args {
+		if len(arg) > 4096 || strings.IndexByte(arg, 0) >= 0 {
+			return errors.New("invalid process argument")
+		}
+		total += len(arg)
+	}
+	if total > 64<<10 || len(p.Env) > 128 {
+		return errors.New("process arguments/environment exceed preview quota")
+	}
+	if !strings.HasPrefix(p.Cwd, "/") || filepath.Clean(p.Cwd) != p.Cwd {
+		return errors.New("process working directory must be clean and absolute")
+	}
+	seen := map[string]bool{}
+	for _, entry := range p.Env {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok || key == "" || len(entry) > 4096 || strings.IndexByte(entry, 0) >= 0 {
+			return errors.New("invalid process environment entry")
+		}
+		for i, ch := range key {
+			if !(ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' || ch == '_' || i > 0 && ch >= '0' && ch <= '9') {
+				return errors.New("invalid process environment key")
+			}
+		}
+		if seen[key] {
+			return errors.New("duplicate process environment key")
+		}
+		seen[key] = true
+		total += len(entry)
+	}
+	if total > 128<<10 {
+		return errors.New("process arguments/environment exceed total quota")
+	}
+	return nil
+}
+
+// RequireSingleCallerMapping is a deliberately narrow preview gate: container
+// UID/GID 0 may map only to the invoking non-root host user and primary group.
+// Subordinate ranges are deliberately unsupported until delegation is audited.
+func RequireSingleCallerMapping(s *Spec, uid, gid uint32) error {
+	if s == nil || s.Linux == nil || s.Process == nil || uid == 0 || gid == 0 {
+		return errors.New("nonroot invoking user/group required")
+	}
+	if len(s.Linux.UIDMappings) != 1 || len(s.Linux.GIDMappings) != 1 ||
+		s.Process.User.UID != 0 || s.Process.User.GID != 0 {
+		return errors.New("preview requires one container-root mapping")
+	}
+	u := s.Linux.UIDMappings[0]
+	g := s.Linux.GIDMappings[0]
+	if u.ContainerID != 0 || u.HostID != uid || u.Size != 1 ||
+		g.ContainerID != 0 || g.HostID != gid || g.Size != 1 {
+		return errors.New("host mapping must match invoking user/group")
+	}
+	return nil
 }

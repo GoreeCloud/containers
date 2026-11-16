@@ -137,6 +137,13 @@ func oci(args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := engine.TrustedRuntimeBinary(path); err != nil {
+		return err
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return err
+	}
 	stateRoot, err := engine.PrepareStateRoot(os.Getenv("XDG_RUNTIME_DIR"))
 	if err != nil {
 		return err

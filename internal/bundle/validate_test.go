@@ -121,3 +121,41 @@ func FuzzBundleStrictJSON(f *testing.F) {
 		_ = rejectDuplicateKeys(b)
 	})
 }
+
+func TestCallerOnlyMappingPolicy(t *testing.T) {
+	spec, err := Load(setup(t, safeSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireSingleCallerMapping(spec, 1000, 1000); err != nil {
+		t.Fatal(err)
+	}
+	for _, ids := range [][2]uint32{{0, 1000}, {1000, 0}, {2000, 1000}, {1000, 2000}} {
+		if err := RequireSingleCallerMapping(spec, ids[0], ids[1]); err == nil {
+			t.Fatalf("unapproved mapping accepted: %v", ids)
+		}
+	}
+	spec.Linux.UIDMappings = append(spec.Linux.UIDMappings, IDMap{ContainerID: 1, HostID: 2000, Size: 1})
+	if err := RequireSingleCallerMapping(spec, 1000, 1000); err == nil {
+		t.Fatal("unsupported subordinate map accepted")
+	}
+}
+func TestProcessPreviewRestrictions(t *testing.T) {
+	cases := []*Process{
+		{Args: []string{"relative"}, Cwd: "/"},
+		{Args: []string{"/bin/../etc/passwd"}, Cwd: "/"},
+		{Args: []string{"/bin/true"}, Cwd: "tmp"},
+		{Args: []string{"/bin/true"}, Cwd: "/", Env: []string{"A=1", "A=2"}},
+		{Args: []string{"/bin/true"}, Cwd: "/", Env: []string{"1BAD=x"}},
+		{Args: []string{"/bin/true"}, Cwd: "/", Env: []string{"X"}},
+		{Args: []string{"/bin/true"}, Cwd: "/", Env: []string{"A=good" + strings.Repeat("x", 4096)}},
+	}
+	for i, p := range cases {
+		if err := validateProcess(p); err == nil {
+			t.Fatalf("invalid process %d accepted", i)
+		}
+	}
+	if err := validateProcess(&Process{Args: []string{"/bin/true"}, Cwd: "/", Env: []string{"LANG=C"}}); err != nil {
+		t.Fatal(err)
+	}
+}

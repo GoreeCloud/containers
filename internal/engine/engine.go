@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -103,7 +104,11 @@ func (e *Engine) Create(ctx context.Context, id, dir string) error {
 	if err := ValidateID(id); err != nil {
 		return err
 	}
-	if err := bundle.Validate(dir); err != nil {
+	spec, err := bundle.Load(dir)
+	if err != nil {
+		return err
+	}
+	if err := bundle.RequireSingleCallerMapping(spec, uint32(os.Geteuid()), uint32(os.Getegid())); err != nil {
 		return err
 	}
 	absolute, err := filepath.Abs(dir)
@@ -173,6 +178,48 @@ func privateDir(path string) error {
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok || st.Uid != uint32(os.Geteuid()) {
 		return errors.New("runtime state directory must be user-owned")
+	}
+	return nil
+}
+
+// TrustedRuntimeBinary restricts the externally installed OCI runtime path
+// to non-writable, root-owned system binaries. This does not audit its source.
+func TrustedRuntimeBinary(path string) error {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return errors.New("OCI runtime must have a clean absolute path")
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return errors.New("OCI runtime path could not be resolved")
+	}
+	if resolved != path && !strings.HasPrefix(path, "/bin/") {
+		return errors.New("symlinked OCI runtime binary is unsupported")
+	}
+	dir := filepath.Dir(resolved)
+	if dir != "/usr/bin" && dir != "/usr/local/bin" {
+		return errors.New("OCI runtime must be installed in a trusted system directory")
+	}
+	if name := filepath.Base(resolved); name != "crun" && name != "runc" {
+		return errors.New("unexpected low-level OCI executable")
+	}
+	fi, err := os.Lstat(resolved)
+	if err != nil {
+		return err
+	}
+	stat, ok := fi.Sys().(*syscall.Stat_t)
+	if !fi.Mode().IsRegular() || !ok || stat.Uid != 0 ||
+		fi.Mode().Perm()&0022 != 0 || fi.Mode().Perm()&0111 == 0 {
+		return errors.New("OCI runtime must be root-owned, executable and non-writable")
+	}
+	for _, check := range []string{dir, filepath.Dir(dir)} {
+		info, err := os.Stat(check)
+		if err != nil {
+			return err
+		}
+		st, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || !info.IsDir() || st.Uid != 0 || info.Mode().Perm()&0022 != 0 {
+			return errors.New("OCI runtime directory permissions unsafe")
+		}
 	}
 	return nil
 }

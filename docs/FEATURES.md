@@ -3,7 +3,7 @@
 | Capability | Status | Evidence / limitation |
 | --- | --- | --- |
 | First-party Go command-line prototype | Development | cmd/gcontainers; Linux CI |
-| OCI bundle policy validation | Development | internal/bundle; no guarantee of isolation |
+| OCI bundle policy validation | Development | internal/bundle; strict process bounds and caller-only UID/GID mapping preflight; no guarantee of isolation |
 | OCI lifecycle adapter via crun/runc | Development | internal/engine; real kernel runtime acceptance open |
 | Rootless image store and OCI registry support | Planned | M2: no production image pull/build |
 | Rootless network, volumes and cgroups | Planned | M3 |

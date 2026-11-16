@@ -102,3 +102,16 @@ func TestRuntimeEnvironmentIsScoped(t *testing.T) {
 		}
 	}
 }
+
+func TestRejectUntrustedExecutable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "crun")
+	if err := os.WriteFile(path, []byte("fake"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := TrustedRuntimeBinary(path); err == nil {
+		t.Fatal("untrusted user executable accepted")
+	}
+	if err := TrustedRuntimeBinary("../crun"); err == nil {
+		t.Fatal("relative runtime path accepted")
+	}
+}
