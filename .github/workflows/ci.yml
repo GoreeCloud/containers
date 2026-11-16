@@ -39,6 +39,12 @@ jobs:
           grep -Fq '"dryRun": true' "$d/plan.json"
           grep -Fq '"specSHA256": "sha256:' "$d/plan.json"
           grep -Fq '"independentServices": [' "$d/plan.json"
+          ./gcontainers stack diff examples/native-stack.json examples/native-stack.json > "$d/diff.json"
+          grep -Fq '"dryRun": true' "$d/diff.json"
+          grep -Fq '"manualReviewRequired": false' "$d/diff.json"
+          tar -C "$d" -cf "$d/layer.tar" blob
+          ./gcontainers image inspect-layer "$d/layer.tar" tar > "$d/layer.json"
+          grep -Fq '"fileCount": 1' "$d/layer.json"
           if ./gcontainers stack apply examples/native-stack.json; then
             echo "Unimplemented stack apply should fail closed" >&2
             exit 1
