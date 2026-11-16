@@ -159,3 +159,7 @@ The full-store audit now enforces the same private ownership, no-extra-hardlink 
 ### Post-acquisition OCI lock identity check
 
 The private per-container cooperative lock now checks its pathname inode, owner and private permissions **after** acquiring the filesystem flock, not only before waiting. This catches a replaced lock pathname during a competing operation's wait. Direct OCI runtime invocations, hostile same-user lock replacement after the check and real kernel process supervision remain unverified and cannot be treated as solved.
+
+### Post-hash blob identity revalidation
+
+The read-only full-store integrity audit now rechecks every committed blob's opened-file and pathname identities, size, owner, private mode and link count after hashing but before accepting its digest. Synthetic tests prove detection of same-size pathname replacement and permission changes during an inspection. This is a bounded observational check, not an immutable filesystem snapshot, cryptographic source signature or malicious same-user write defense.
