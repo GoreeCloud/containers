@@ -181,3 +181,14 @@ func TestConflictingDescriptorRejected(t *testing.T) {
 		t.Fatal("conflicting OCI descriptor accepted")
 	}
 }
+
+func FuzzOCIImageMetadataJSON(f *testing.F) {
+	f.Add([]byte("{\"schemaVersion\":2,\"manifests\":[]}"))
+	f.Add([]byte("{\"schemaVersion\":2,\"schemaVersion\":1}"))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		if len(b) > 8192 {
+			t.Skip()
+		}
+		_ = uniqueJSON(b)
+	})
+}
