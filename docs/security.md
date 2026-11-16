@@ -193,3 +193,7 @@ Even a source-valid, in-budget change to replicas, dependencies or other nonsecr
 ### Repeat low-level runtime safety admission per operation
 
 The real OCI adapter now uses a wrapper that rechecks the root-owned executable path and reviewed crun/runc version before each low-level OCI operation, not solely on Engine initialization. A synthetic test simulates a runtime downgrade after successful calls and proves it blocks subsequent OCI invocations. A privileged root-level mutation in the interval between rechecking and exec, vendor backport provenance and actual process/container isolation remain outside this evidence; no old runtime is launched in testing.
+
+### Post-read identity verification for full OCI image layouts
+
+The read-only OCI layout verifier now rechecks every metadata and blob file's anchored pathname, inode and byte length after consuming it, and bounds repeated zero-progress reads. Deterministic regressions replace an opened blob with a same-length new inode, alter metadata length, and substitute a symlink. This does not freeze a filesystem, verify publisher signatures, or eliminate malicious same-user writes after inspection.
