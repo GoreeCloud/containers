@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,8 +12,9 @@ import (
 )
 
 type fakeRunner struct {
-	argv []string
-	fail bool
+	argv   []string
+	fail   bool
+	status string
 }
 
 func (f *fakeRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -20,7 +22,27 @@ func (f *fakeRunner) Run(_ context.Context, _ string, args ...string) ([]byte, e
 	if f.fail {
 		return nil, errors.New("runtime failed")
 	}
-	return []byte(`{"status":"created"}`), nil
+	if len(args) < 4 {
+		return nil, errors.New("missing operation or id")
+	}
+	if f.status == "" {
+		f.status = "created"
+	}
+	switch args[2] {
+	case "state":
+		pid := 0
+		if f.status == "running" {
+			pid = 4321
+		}
+		return []byte(fmt.Sprintf(`{"id":%q,"status":%q,"pid":%d}`, args[3], f.status, pid)), nil
+	case "start":
+		f.status = "running"
+	case "kill":
+		f.status = "stopped"
+	case "delete":
+		f.status = "stopped"
+	}
+	return []byte("ok"), nil
 }
 func TestIdentifiers(t *testing.T) {
 	for _, id := range []string{"", "../x", "Upper", "a/b", "-oops", "a b"} {
@@ -44,6 +66,7 @@ func TestStateAndLifecycle(t *testing.T) {
 	if len(f.argv) != 4 || f.argv[2] != "state" || f.argv[3] != "a" {
 		t.Fatalf("incorrect invocation: %v", f.argv)
 	}
+	f.status = "running"
 	if err := e.Stop(context.Background(), "a"); err != nil {
 		t.Fatal(err)
 	}
@@ -150,5 +173,42 @@ func TestProcessRunnerHonorsCancellation(t *testing.T) {
 func TestProcessRunnerRejectsNilContext(t *testing.T) {
 	if _, err := (ProcessRunner{}).Run(nil, "/usr/bin/true"); err == nil {
 		t.Fatal("nil context accepted")
+	}
+}
+
+func TestLifecycleRejectsInvalidTransitions(t *testing.T) {
+	fake := &fakeRunner{status: "running"}
+	eng, err := New("/usr/bin/crun", "/tmp/synthetic-private-state", fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Start(context.Background(), "worker"); err == nil {
+		t.Fatal("start accepted for running container")
+	}
+	if err := eng.Delete(context.Background(), "worker"); err == nil {
+		t.Fatal("running container delete accepted")
+	}
+	fake.status = "stopped"
+	if err := eng.Stop(context.Background(), "worker"); err == nil {
+		t.Fatal("stop accepted for stopped container")
+	}
+	if err := eng.Start(context.Background(), "worker"); err == nil {
+		t.Fatal("start accepted for stopped container")
+	}
+	fake.status = "created"
+	if err := eng.Start(context.Background(), "worker"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.status != "running" {
+		t.Fatal("start not dispatched")
+	}
+	if err := eng.Stop(context.Background(), "worker"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.status != "stopped" {
+		t.Fatal("stop not dispatched")
+	}
+	if err := eng.Delete(context.Background(), "worker"); err != nil {
+		t.Fatal(err)
 	}
 }

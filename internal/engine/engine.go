@@ -3,6 +3,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -143,30 +144,44 @@ func (e *Engine) Create(ctx context.Context, id, dir string) error {
 	return err
 }
 func (e *Engine) Start(ctx context.Context, id string) error {
-	if err := ValidateID(id); err != nil {
+	state, err := e.readState(ctx, id)
+	if err != nil {
 		return err
 	}
-	_, err := e.call(ctx, "start", id)
+	if state.Status != "created" {
+		return errors.New("OCI container must be in created state before start")
+	}
+	_, err = e.call(ctx, "start", id)
 	return err
 }
 func (e *Engine) State(ctx context.Context, id string) ([]byte, error) {
-	if err := ValidateID(id); err != nil {
+	state, err := e.readState(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return e.call(ctx, "state", id)
+	// Exclude caller-controlled bundle and annotations from user output.
+	return json.Marshal(state)
 }
 func (e *Engine) Stop(ctx context.Context, id string) error {
-	if err := ValidateID(id); err != nil {
+	state, err := e.readState(ctx, id)
+	if err != nil {
 		return err
 	}
-	_, err := e.call(ctx, "kill", id, "SIGTERM")
+	if state.Status != "running" {
+		return errors.New("OCI container must be running before a stop request")
+	}
+	_, err = e.call(ctx, "kill", id, "SIGTERM")
 	return err
 }
 func (e *Engine) Delete(ctx context.Context, id string) error {
-	if err := ValidateID(id); err != nil {
+	state, err := e.readState(ctx, id)
+	if err != nil {
 		return err
 	}
-	_, err := e.call(ctx, "delete", id) // Never force removal of a running container.
+	if state.Status != "created" && state.Status != "stopped" {
+		return errors.New("running OCI container must not be deleted")
+	}
+	_, err = e.call(ctx, "delete", id) // Never force removal of running processes.
 	return err
 }
 
