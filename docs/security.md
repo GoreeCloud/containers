@@ -141,3 +141,7 @@ The OCI writer lock now rechecks its pathname inode **after** acquiring the advi
 ## Offline stack revision conflict preflight
 
 The native revision-check command requires the caller to supply the expected canonical SHA-256 fingerprint of a prior stack declaration. It fails with a structured conflict report if the supplied source document does not match that fingerprint; both matched and mismatched cases explicitly report deploymentAuthorized=false, liveStateVerified=false and rollbackVerified=false. This detects stale **input documents**, not concurrent changes to running workloads. A future privileged/authorized controller must atomically compare its actual committed generation under its own lock before any rollout.
+
+### Fail-closed OCI state reads
+
+The real adapter now acquires the per-container cooperative lock and checks the private pending journal BEFORE reading state from the external OCI runtime. An unresolved mutation causes a nonzero result instead of a misleading healthy status. Synthetic injected-runner tests verify that a pending intent blocks status reads and that a concurrent mutation lock delays status. This cannot attest to the state of processes manipulated directly by unrelated runtimes.
