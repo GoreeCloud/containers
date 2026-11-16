@@ -33,6 +33,8 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 ./gcontainers oci create --id example --bundle /path/to/oci-bundle --experimental
 ./gcontainers oci start --id example --experimental
 ./gcontainers oci state --id example
+# Read-only private journal incident aggregate; no runtime required:
+./gcontainers oci pending-summary
 ./gcontainers oci stop --id example --experimental
 ./gcontainers oci delete --id example --experimental
 ```
