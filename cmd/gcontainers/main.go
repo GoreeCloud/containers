@@ -16,6 +16,7 @@ import (
 
 	"github.com/GoreeCloud/containers/internal/bundle"
 	"github.com/GoreeCloud/containers/internal/engine"
+	"github.com/GoreeCloud/containers/internal/ociimage"
 )
 
 const version = "0.1.0-dev"
@@ -52,6 +53,8 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "oci":
 		return oci(args[1:], out)
+	case "image":
+		return imageCommand(args[1:], out)
 	default:
 		return errors.New("unknown command (try help)")
 	}
@@ -60,6 +63,8 @@ func usage(w io.Writer) error {
 	_, err := fmt.Fprintln(w, `GoreeCloud Containers 0.1.0-dev — Linux rootless OCI preview
 Usage:
   gcontainers doctor
+  gcontainers image verify OCI_LAYOUT_DIR
+  gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
   gcontainers validate BUNDLE_DIRECTORY
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
   gcontainers oci start|stop|delete --id NAME --experimental
@@ -179,5 +184,67 @@ func oci(args []string, w io.Writer) error {
 	if action != "state" {
 		_, err = fmt.Fprintf(w, "OCI %s: %s (preview)\n", action, *id)
 	}
+	return err
+}
+
+func imageCommand(args []string, out io.Writer) error {
+	if len(args) == 2 && args[0] == "verify" {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		report, err := ociimage.VerifyLayout(ctx, args[1])
+		if err != nil {
+			return err
+		}
+		b, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(out, string(b))
+		return err
+	}
+	if len(args) == 0 || args[0] != "import" {
+		return errors.New("usage: image verify OCI_LAYOUT_DIR | image import --store ABS_DIR --file ABS_BLOB --experimental")
+	}
+	if runtime.GOOS != "linux" || os.Geteuid() == 0 {
+		return errors.New("image import requires an unprivileged Linux user")
+	}
+	flags := flag.NewFlagSet("image import", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	root := flags.String("store", "", "absolute private content store directory")
+	source := flags.String("file", "", "local regular file to import as opaque bytes")
+	experimental := flags.Bool("experimental", false, "explicit permission for preview store write")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || !*experimental || !filepath.IsAbs(*root) || !filepath.IsAbs(*source) {
+		return errors.New("image import requires --store ABS_DIR --file ABS_BLOB --experimental")
+	}
+	info, err := os.Lstat(*source)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("image import requires a regular non-symlink source file")
+	}
+	input, err := os.Open(*source)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	store, err := ociimage.OpenStore(*root)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	blob, err := store.Put(ctx, input)
+	if err != nil {
+		return err
+	}
+	output, err := json.MarshalIndent(blob, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(out, string(output))
 	return err
 }
