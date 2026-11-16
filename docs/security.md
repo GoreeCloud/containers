@@ -189,3 +189,7 @@ An optional positive DESCRIPTOR_BYTES CLI argument now requires the caller-suppl
 ### Operator grant is a required native transition gate
 
 Even a source-valid, in-budget change to replicas, dependencies or other nonsecret application fields now fails the offline native preflight until a future GoreeCloud Identity operator authorization exists. The source-only tool reports goreeCloudIdentityReviewRequired=true and mipsAuthorizationVerified=false; it never grants, fetches or assumes an Identity token. A no-op input may pass offline checks but still cannot authorize a deployment.
+
+### Repeat low-level runtime safety admission per operation
+
+The real OCI adapter now uses a wrapper that rechecks the root-owned executable path and reviewed crun/runc version before each low-level OCI operation, not solely on Engine initialization. A synthetic test simulates a runtime downgrade after successful calls and proves it blocks subsequent OCI invocations. A privileged root-level mutation in the interval between rechecking and exec, vendor backport provenance and actual process/container isolation remain outside this evidence; no old runtime is launched in testing.
