@@ -175,3 +175,9 @@ The new gcontainers kernel-probe command creates only an unprivileged copy of it
 ### Digest-pinned offline OCI layer admission preview
 
 The new image verify-layer CLI requires a caller-provided exact SHA-256 digest, a clean absolute nonsymlink input path, and a bounded tar or tar+gzip archive. It hashes the exact compressed/source bytes in the same stream consumed by the strict archive inspector, then rechecks the pathname and file identity before returning a conservative structured report. A matching digest is NOT authenticated provenance or a signed manifest, and a structurally supported archive is NOT authorization to unpack, mount or run its contents. Whiteouts, links, devices, privilege metadata and other unsupported archive semantics remain denied.
+
+### Fail-closed OCI image-reference changes in native stack preflight
+
+An added/removed service or changed immutable image digest now requires separate Wardveil source/provenance and GoreeShield privacy reviews, recorded as unverified offline gates. The report includes only the affected service count, never the image digest or registry name. An in-budget, correct-revision declaration with changed images still fails preflight. This does NOT query the image store, verify a signed manifest, grant an approval or authorize a rollout.
+
+The combined native preflight masks image-digest identifiers in its embedded transition-impact steps, while retaining action and service labels for review. Direct stack diff/impact commands remain separate developer diagnostics and must not be treated as privacy-redacted approval records.
