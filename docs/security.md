@@ -69,3 +69,5 @@ The OCI writer lock now rechecks its pathname inode **after** acquiring the advi
 ### Hardened individual blob verification
 
 The private store Verify operation now rejects group/world-readable files, unexpected ownership, extra hardlinks, unsafe symlink paths, and changes in the opened file/path identity during verification. Bounded, cancellation-aware hashing detects content mismatch and unexpected growth. This closes deduplication checks that previously relied primarily on matching bytes; it remains a moment-in-time integrity check, not source authentication or resistance to hostile same-user modification.
+
+The full-store audit now enforces the same private ownership, no-extra-hardlink and no group/world access rules for committed blobs as individual digest verification. It fails on unsafe mode/ownership metadata rather than claiming the whole store was verified.
