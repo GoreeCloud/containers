@@ -69,3 +69,9 @@ The read-only native stack preflight command parses the source and target declar
 ### MIPS-sensitive secret-reference change gate
 
 The source-only native preflight counts (but does not name or resolve) services whose secret references are introduced, removed or changed. It separately flags GoreeCloud Identity (authorization), GoreeShield (privacy and consent), and Wardveil (cybersecurity policy) for review; it explicitly reports MIPS authorization as unverified and exits unsuccessfully for sensitive changes. This is an offline safety gate, not an implemented policy provider, grant mechanism or proof of approved deployment.
+
+### Fail-closed OCI image-reference changes in native stack preflight
+
+An added/removed service or changed immutable image digest now requires separate Wardveil source/provenance and GoreeShield privacy reviews, recorded as unverified offline gates. The report includes only the affected service count, never the image digest or registry name. An in-budget, correct-revision declaration with changed images still fails preflight. This does NOT query the image store, verify a signed manifest, grant an approval or authorize a rollout.
+
+The combined native preflight masks image-digest identifiers in its embedded transition-impact steps, while retaining action and service labels for review. Direct stack diff/impact commands remain separate developer diagnostics and must not be treated as privacy-redacted approval records.
