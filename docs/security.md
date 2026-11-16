@@ -67,3 +67,7 @@ The low-level runtime adapter now places its child invocation in an isolated pro
 ## Read-only layer preflight
 
 The development layer inspector parses a restricted tar or gzip-compressed tar subset with explicit entry count, input size and total uncompressed size limits. It rejects traversal, absolute paths, hard/symbolic links, device nodes, special permissions, duplicated or conflicting paths, whiteouts and PAX metadata. This **does not unpack, apply OCI whiteouts, support zstd, verify registry provenance or certify images as safe**. Unsupported valid OCI features intentionally fail closed pending a secure extractor, audited semantics, and isolated host acceptance.
+
+## Proposed stack transitions (development only)
+
+The new stack diff OLD_JSON NEW_JSON command generates a deterministic, read-only change proposal. It orders additions by target dependency and removals in reverse original dependency order; any add, replace or removal requires manual review and future data/rollback acceptance. This **does not perform any migration** or imply that native deployment execution, rollback, secret resolution, network isolation, storage preservation or production admission is implemented.

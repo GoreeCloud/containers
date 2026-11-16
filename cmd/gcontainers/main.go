@@ -59,6 +59,26 @@ func run(args []string, out io.Writer) error {
 		return imageCommand(args[1:], out)
 
 	case "stack":
+		if len(args) == 4 && args[1] == "diff" {
+			before, err := stack.Load(args[2])
+			if err != nil {
+				return err
+			}
+			after, err := stack.Load(args[3])
+			if err != nil {
+				return err
+			}
+			changes, err := stack.Diff(before, after)
+			if err != nil {
+				return err
+			}
+			serialized, err := json.MarshalIndent(changes, "", "  ")
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(out, string(serialized))
+			return err
+		}
 		if len(args) != 3 || (args[1] != "validate" && args[1] != "plan") {
 			return errors.New("usage: gcontainers stack validate|plan NATIVE_STACK_JSON")
 		}
@@ -94,6 +114,7 @@ Usage:
 
 gcontainers stack validate NATIVE_STACK_JSON
   gcontainers stack plan NATIVE_STACK_JSON
+  gcontainers stack diff OLD_STACK_JSON NEW_STACK_JSON
   gcontainers validate BUNDLE_DIRECTORY
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
   gcontainers oci start|stop|delete --id NAME --experimental

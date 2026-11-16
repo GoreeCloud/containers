@@ -128,3 +128,29 @@ func TestLayerInspectionCLI(t *testing.T) {
 		t.Fatal("unsupported compression accepted")
 	}
 }
+
+func TestNativeStackDiffCLIIsReadOnly(t *testing.T) {
+	old := strings.Replace(`{"apiVersion":"goreecloud.containers/v1alpha1","kind":"Stack","metadata":{"name":"a"},"services":[{"name":"web","image":"sha256:__HASH__","replicas":1,"resources":{"cpuMilli":250,"memoryBytes":33554432},"security":{"runAsNonRoot":true,"readOnlyRootFilesystem":true,"network":"isolated"}}]}`, "__HASH__", strings.Repeat("a", 64), 1)
+	updated := strings.Replace(old, `"replicas":1`, `"replicas":2`, 1)
+	base := t.TempDir()
+	one := filepath.Join(base, "one.json")
+	two := filepath.Join(base, "two.json")
+	if err := os.WriteFile(one, []byte(old), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(two, []byte(updated), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := run([]string{"stack", "diff", one, two}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"manualReviewRequired": true`) ||
+		!strings.Contains(out.String(), `"action": "would-replace-manual-review"`) ||
+		!strings.Contains(out.String(), `"dryRun": true`) {
+		t.Fatalf("unsafe dry-run response: %s", out.String())
+	}
+	if err := run([]string{"stack", "diff", one}, &out); err == nil {
+		t.Fatal("missing target accepted")
+	}
+}

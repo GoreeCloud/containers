@@ -35,6 +35,8 @@ go build -o gcontainers ./cmd/gcontainers
 ./gcontainers image import --store /home/you/private-image-store --file /path/to/blob --experimental
 ./gcontainers stack validate examples/native-stack.json
 ./gcontainers stack plan examples/native-stack.json
+# Read-only changes between two native declarations:
+./gcontainers stack diff examples/native-stack.json examples/native-stack.json
 ./gcontainers validate /path/to/oci-bundle
 ```
 
