@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -175,5 +176,51 @@ func TestChangedStackChangesFingerprint(t *testing.T) {
 	}
 	if plan1.SpecSHA256 == plan2.SpecSHA256 {
 		t.Fatal("changed workload spec not reflected in plan fingerprint")
+	}
+}
+
+func TestStackLoadRejectsSymlinkedFile(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "valid.json")
+	if err := os.WriteFile(src, fixture(minimalService("web")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias.json")
+	if err := os.Symlink(src, alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(alias); err == nil {
+		t.Fatal("symlinked stack file accepted")
+	}
+	if _, err := Load(src); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestStackLoadRejectsSymlinkedDirectory(t *testing.T) {
+	original := t.TempDir()
+	file := filepath.Join(original, "valid.json")
+	if err := os.WriteFile(file, fixture(minimalService("web")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(original, alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(filepath.Join(alias, "valid.json")); err == nil {
+		t.Fatal("symlinked stack parent directory accepted")
+	}
+}
+func TestStackLoadDetectsChangedOrOverlargeFiles(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "stack.json")
+	if err := os.WriteFile(file, bytes.Repeat([]byte("a"), int(MaxBytes)+1), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(file); err == nil {
+		t.Fatal("overlarge stack file accepted")
+	}
+	if err := os.WriteFile(file, fixture(minimalService("web")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(file); err != nil {
+		t.Fatal(err)
 	}
 }

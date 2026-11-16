@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 )
@@ -67,25 +68,51 @@ type Plan struct {
 	TotalMemoryBytes int64   `json:"totalMemoryBytes"`
 }
 
-func Load(path string) (Spec, error) {
-	fi, err := os.Lstat(path)
+// Load reads one immutable-in-memory snapshot of a local stack declaration.
+// It rejects symlinked source files and parent directories and checks inode
+// identity to reduce path replacement attacks. It never applies workloads.
+func Load(source string) (Spec, error) {
+	absolute, err := filepath.Abs(source)
 	if err != nil {
 		return Spec{}, err
 	}
-	if !fi.Mode().IsRegular() || fi.Size() > MaxBytes {
-		return Spec{}, errors.New("stack file must be a regular file no larger than 1 MiB")
+	parent := filepath.Dir(absolute)
+	resolved, err := filepath.EvalSymlinks(parent)
+	if err != nil || resolved != parent {
+		return Spec{}, errors.New("symlinked stack parent directory prohibited")
 	}
-	f, err := os.Open(path)
+	root, err := os.OpenRoot(parent)
+	if err != nil {
+		return Spec{}, err
+	}
+	defer root.Close()
+	name := filepath.Base(absolute)
+	info, err := root.Lstat(name)
+	if err != nil {
+		return Spec{}, err
+	}
+	if !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > MaxBytes {
+		return Spec{}, errors.New("stack file must be non-symlink regular file no larger than 1 MiB")
+	}
+	f, err := root.Open(name)
 	if err != nil {
 		return Spec{}, err
 	}
 	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil || !os.SameFile(info, opened) || !opened.Mode().IsRegular() {
+		return Spec{}, errors.New("stack file changed during opening")
+	}
 	b, err := io.ReadAll(io.LimitReader(f, MaxBytes+1))
 	if err != nil {
 		return Spec{}, errors.New("unable to read stack declaration")
 	}
+	if int64(len(b)) != info.Size() || int64(len(b)) > MaxBytes {
+		return Spec{}, errors.New("stack declaration grew, shrank or exceeded quota during read")
+	}
 	return Parse(b)
 }
+
 func Parse(b []byte) (Spec, error) {
 	var spec Spec
 	if len(b) == 0 || int64(len(b)) > MaxBytes {

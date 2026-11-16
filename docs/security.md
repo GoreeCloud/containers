@@ -103,3 +103,7 @@ The real low-level runtime adapter now wraps create/start/stop/delete and their 
 ## Local content-store integrity auditing
 
 The read-only image audit command opens an **existing** private user-owned blob store without creating or repairing it. It verifies the SHA-256 bytes of each committed regular file, rejects symlinks, unexpected names, hardlinks, oversized entries, more than 4096 entries, and aggregate audit sizes above 1 GiB. The summary intentionally omits sensitive paths and filenames. A passing audit proves observed byte integrity only, not provenance, signatures, malware safety, registry trust, or protection against same-user mutations after audit. Aggregate limits are verification bounds, **not disk reservations or enforcement of a global write quota**.
+
+## Immutable-in-memory native stack-file reads
+
+The stack declaration loader now resolves an absolute local file parent, rejects symlinked parent directories and symlinked declaration files, opens via an os.Root directory descriptor, compares the opened inode to the checked file and requires exact bounded content length. The parsed document is a single in-memory snapshot; **this is not a signed policy decision or protection against a malicious same-user process modifying the opened inode concurrently**. Deployment remains unimplemented.
