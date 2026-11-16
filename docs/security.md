@@ -45,3 +45,7 @@ The native stack capacity command accepts **caller-provided** CPU millicore, mem
 ## Linux rootless host capability observation
 
 The optional host inspect command reads only fixed, size-bounded Linux proc/sysfs capability files to report the presence of cgroup v2 cpu/memory/pids controllers and unprivileged user-namespace configuration. It does not reveal usernames, paths, container names or secret data. It never invokes unshare, writes cgroup files, modifies services, verifies per-user cgroup delegation or proves namespace isolation. All reports explicitly retain deploymentAuthorized=false, delegationVerified=false and isolationVerified=false, even when every observed kernel fact appears favorable. VPS Mesh readiness must be verified separately on an authorized staging target.
+
+## Immutable-in-memory native stack-file reads
+
+The stack declaration loader now resolves an absolute local file parent, rejects symlinked parent directories and symlinked declaration files, opens via an os.Root directory descriptor, compares the opened inode to the checked file and requires exact bounded content length. The parsed document is a single in-memory snapshot; **this is not a signed policy decision or protection against a malicious same-user process modifying the opened inode concurrently**. Deployment remains unimplemented.
