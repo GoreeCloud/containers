@@ -175,12 +175,30 @@ func (e *Engine) Start(ctx context.Context, id string) error {
 	})
 }
 func (e *Engine) State(ctx context.Context, id string) ([]byte, error) {
-	state, err := e.readState(ctx, id)
+	var output []byte
+	// Status reads use the same cooperative lock as state mutations.
+	// An unresolved command must never be reported as a healthy state.
+	err := e.mutate(ctx, id, func() error {
+		if e.lockMutations {
+			marker, err := ReadPendingMutation(ctx, e.StateRoot, id)
+			if err != nil {
+				return fmt.Errorf("OCI journal inspection failed: %w", err)
+			}
+			if marker.Pending || marker.RecoveryRequired {
+				return ErrUnresolvedMutation
+			}
+		}
+		state, err := e.readState(ctx, id)
+		if err != nil {
+			return err
+		}
+		output, err = json.Marshal(state)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	// Exclude caller-controlled bundle and annotations from user output.
-	return json.Marshal(state)
+	return output, nil
 }
 func (e *Engine) Stop(ctx context.Context, id string) error {
 	return e.mutate(ctx, id, func() error {
