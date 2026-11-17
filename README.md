@@ -16,7 +16,7 @@ There is no accepted production installation or supported device release from th
 
 ## License and provenance
 
-No repository-level open-source license is committed to main. Public visibility does **not** grant general rights to redistribute or relicense this code. A repository-specific license decision is still needed after verifying contributor and upstream rights.
+The original GoreeCloud-authored README and documentation/source-admission workflow currently merged into main are distributed under the [MIT License](LICENSE), copyright (c) 2026 GoreeCloud. This limited grant does **not** assert a license for the separate unmerged rootless OCI engine, third-party runtimes, dependencies, images or trademarks. Review those component rights and compatibility independently before merging source.
 
 External source, dependencies, images, licenses and branding remain subject to their respective copyright, attribution, security and compatibility obligations.
 
