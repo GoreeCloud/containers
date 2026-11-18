@@ -60,6 +60,34 @@ func TestFailClosed(t *testing.T) {
 		})
 	}
 }
+func TestOCIWorkflowLayoutPreflightDoesNotAcceptMissingOrSymlinkedDevices(t *testing.T) {
+	dir := setup(t, safeSpec)
+	spec, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateRuntimeLayout(dir, spec); err == nil {
+		t.Fatal("accepted missing /dev and /proc as runtime-ready")
+	}
+	for _, name := range []string{"dev", "proc"} {
+		if err := os.Mkdir(filepath.Join(dir, "rootfs", name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ValidateRuntimeLayout(dir, spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "rootfs", "dev")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/tmp", filepath.Join(dir, "rootfs", "dev")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateRuntimeLayout(dir, spec); err == nil {
+		t.Fatal("accepted symlinked guest device directory")
+	}
+}
+
 func TestTooLargeAndSymlink(t *testing.T) {
 	dir := setup(t, safeSpec+strings.Repeat(" ", MaxConfigBytes))
 	if err := Validate(dir); err == nil {

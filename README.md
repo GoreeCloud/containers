@@ -67,6 +67,8 @@ source_sha="$(./gcontainers stack plan examples/native-stack.json | sed -nE 's/^
 ./gcontainers validate /path/to/oci-bundle
 ```
 
+For experimental `oci create`, the preview also checks that `rootfs/dev` and `rootfs/proc` are real directories (not missing or symlinked) **before** invoking `runc`/`crun` or writing the mutation journal. This rejects incomplete disposable OCI fixtures earlier; it does **not** prove that a runtime will successfully create a guest, that `/proc` is mounted safely, or that isolation and rollback gates pass.
+
 Running an experimental rootless bundle also requires a maintained `crun` or `runc` installation, a private `XDG_RUNTIME_DIR`, a suitable Linux kernel, correctly mapped UID/GID ranges, rootfs, and an OCI spec satisfying the preview policy. Execution is not recommended on production hosts.
 
 ```sh
