@@ -11,6 +11,7 @@ func TestDecodeRuntimeStates(t *testing.T) {
 		`{"id":"alpha","status":"created"}`,
 		`{"ociVersion":"1.0.2","id":"alpha","status":"running","pid":391,"bundle":"/private/bundle","annotations":{"secret.note":"not-for-logs"}}`,
 		`{"id":"alpha","status":"stopped","pid":0}`,
+		`{"ociVersion":"1.2.0","id":"alpha","status":"created","pid":231,"bundle":"/synthetic/bundle","rootfs":"/synthetic/bundle/rootfs","created":"2026-11-17T21:00:00.123Z","owner":"synthetic-owner"}`,
 	}
 	for _, data := range good {
 		state, err := DecodeRuntimeState([]byte(data), "alpha")
@@ -34,6 +35,10 @@ func TestRejectUntrustedOCIRuntimeState(t *testing.T) {
 		`{"id":"alpha","status":"created","status":"running","pid":42}`,
 		`{"id":"alpha","status":"created","annotations":{"a":"1","a":"2"}}`,
 		`{"id":"alpha","status":"created","evil":true}`,
+		`{"id":"alpha","status":"created","rootfs":42}`,
+		`{"id":"alpha","status":"created","owner":[]}`,
+		`{"id":"alpha","status":"created","created":{}}`,
+		`{"id":"alpha","status":"created","rootfs":"/first","rootfs":"/second"}`,
 		`{"id":"alpha","status":"created"}{}`,
 		strings.Repeat(" ", maxRuntimeOutput+1),
 	}
@@ -44,7 +49,7 @@ func TestRejectUntrustedOCIRuntimeState(t *testing.T) {
 	}
 }
 func TestStateRedactsRuntimeMetadata(t *testing.T) {
-	fake := &scriptedStateRunner{output: `{"id":"alpha","status":"running","pid":342,"bundle":"/private/secret","annotations":{"credential":"do-not-share"}}`}
+	fake := &scriptedStateRunner{output: `{"ociVersion":"1.2.0","id":"alpha","status":"running","pid":342,"bundle":"/private/secret","rootfs":"/private/rootfs","created":"2026-11-17T21:00:00Z","owner":"private-owner","annotations":{"credential":"do-not-share"}}`}
 	engine, err := New("/usr/bin/crun", "/tmp/synthetic-private", fake)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +58,9 @@ func TestStateRedactsRuntimeMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(output), "do-not-share") || strings.Contains(string(output), "/private/secret") {
+	if strings.Contains(string(output), "do-not-share") || strings.Contains(string(output), "/private/secret") ||
+		strings.Contains(string(output), "/private/rootfs") || strings.Contains(string(output), "private-owner") ||
+		strings.Contains(string(output), "2026-11-17") {
 		t.Fatal("sensitive metadata leaked")
 	}
 	if !strings.Contains(string(output), `"running"`) {

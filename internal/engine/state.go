@@ -37,6 +37,9 @@ func DecodeRuntimeState(raw []byte, expectedID string) (RuntimeState, error) {
 		Status      string            `json:"status"`
 		PID         int64             `json:"pid"`
 		Bundle      string            `json:"bundle"`
+		RootFS      string            `json:"rootfs"`  // runc 1.5.x metadata, never echoed
+		Created     string            `json:"created"` // runc 1.5.x metadata, never echoed
+		Owner       string            `json:"owner"`   // runc 1.5.x metadata, never echoed
 		Annotations map[string]string `json:"annotations"`
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
