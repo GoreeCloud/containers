@@ -82,7 +82,11 @@ type Mount struct {
 // This checks minimum paths, NOT OCI confinement or proc/dev mount security.
 func ValidateRuntimeLayout(dir string, spec *Spec) error {
 	if spec == nil || spec.Root == nil || spec.Process == nil ||
-		!filepath.IsLocal(spec.Root.Path) || filepath.Clean(spec.Root.Path) != spec.Root.Path {
+		len(spec.Process.Args) == 0 || !filepath.IsAbs(spec.Process.Args[0]) ||
+		filepath.Clean(spec.Process.Args[0]) != spec.Process.Args[0] ||
+		!filepath.IsAbs(spec.Process.Cwd) || filepath.Clean(spec.Process.Cwd) != spec.Process.Cwd ||
+		!filepath.IsLocal(spec.Root.Path) || spec.Root.Path == "." ||
+		filepath.Clean(spec.Root.Path) != spec.Root.Path {
 		return errors.New("invalid OCI guest rootfs path")
 	}
 	root, err := os.OpenRoot(dir)
