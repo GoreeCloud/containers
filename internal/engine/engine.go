@@ -164,7 +164,27 @@ func (e *Engine) call(ctx context.Context, op string, args ...string) ([]byte, e
 			id = args[len(args)-1]
 		}
 		return RunJournaledMutation(ctx, e.StateRoot, id, op, func() ([]byte, error) {
-			return e.Runner.Run(ctx, e.Binary, argv...)
+			result, err := e.Runner.Run(ctx, e.Binary, argv...)
+			if err != nil {
+				return nil, err
+			}
+			if op == "create" {
+				// Some OCI runtimes can exit successfully from create even when
+				// the guest init process has already exited. Do not clear the
+				// durable mutation marker without a verified created state.
+				raw, err := e.Runner.Run(ctx, e.Binary, "--root", e.StateRoot, "state", id)
+				if err != nil {
+					return nil, errors.New("post-create OCI runtime state unavailable")
+				}
+				state, err := DecodeRuntimeState(raw, id)
+				if err != nil {
+					return nil, errors.New("post-create OCI runtime state rejected")
+				}
+				if state.Status != "created" {
+					return nil, errors.New("post-create OCI runtime did not retain a created guest")
+				}
+			}
+			return result, nil
 		})
 	}
 	return e.Runner.Run(ctx, e.Binary, argv...)
