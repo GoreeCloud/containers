@@ -87,6 +87,52 @@ func TestStateAndLifecycle(t *testing.T) {
 		t.Fatal("bad ID passed")
 	}
 }
+func TestCreateRejectsMissingRuntimeDirectoriesBeforeCallingRuntime(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("rootless mapping requires nonroot")
+	}
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "rootfs"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	config := fmt.Sprintf(`{
+      "ociVersion":"1.2.0",
+      "process":{"args":["/bin/true"],"cwd":"/",
+        "user":{"uid":0,"gid":0},"noNewPrivileges":true,
+        "capabilities":{"bounding":[],"effective":[],"inheritable":[],"permitted":[],"ambient":[]}},
+      "root":{"path":"rootfs","readonly":true},
+      "linux":{"namespaces":[{"type":"user"},{"type":"pid"},{"type":"mount"},{"type":"network"},{"type":"ipc"},{"type":"uts"}],
+      "uidMappings":[{"containerID":0,"hostID":%d,"size":1}],
+      "gidMappings":[{"containerID":0,"hostID":%d,"size":1}],
+      "seccomp":{"defaultAction":"SCMP_ACT_ERRNO"}}
+    }`, os.Geteuid(), os.Getegid())
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeRunner{}
+	engine, err := New("/usr/bin/crun", t.TempDir(), fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Create(context.Background(), "preflight", dir); err == nil {
+		t.Fatal("invalid guest rootfs accepted")
+	}
+	if len(fake.argv) != 0 {
+		t.Fatal("external runtime invoked before validating /dev and /proc")
+	}
+	for _, name := range []string{"dev", "proc"} {
+		if err := os.Mkdir(filepath.Join(dir, "rootfs", name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := engine.Create(context.Background(), "preflight", dir); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.argv) == 0 || fake.argv[2] != "create" {
+		t.Fatal("valid synthetic guest never reached test-only runtime")
+	}
+}
+
 func TestStateRoot(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("rootless test requires nonroot")

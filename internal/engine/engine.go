@@ -182,6 +182,10 @@ func (e *Engine) Create(ctx context.Context, id, dir string) error {
 		if err := bundle.RequireSingleCallerMapping(spec, uint32(os.Geteuid()), uint32(os.Getegid())); err != nil {
 			return err
 		}
+		// Fail invalid guest layouts before entering the journaled runtime call.
+		if err := bundle.ValidateRuntimeLayout(dir, spec); err != nil {
+			return err
+		}
 		absolute, err := filepath.Abs(dir)
 		if err != nil {
 			return err

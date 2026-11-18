@@ -77,6 +77,29 @@ type Mount struct {
 	Options     []string `json:"options"`
 }
 
+// ValidateRuntimeLayout rejects an incomplete on-disk OCI guest rootfs
+// before the external runtime can be called or its mutation journal written.
+// This checks minimum paths, NOT OCI confinement or proc/dev mount security.
+func ValidateRuntimeLayout(dir string, spec *Spec) error {
+	if spec == nil || spec.Root == nil ||
+		!filepath.IsLocal(spec.Root.Path) || filepath.Clean(spec.Root.Path) != spec.Root.Path {
+		return errors.New("invalid OCI guest rootfs path")
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return errors.New("unable to open OCI bundle for layout preflight")
+	}
+	defer root.Close()
+	for _, name := range []string{"dev", "proc"} {
+		path := filepath.Join(spec.Root.Path, name)
+		info, err := root.Lstat(path)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("OCI guest rootfs requires a real %s directory", name)
+		}
+	}
+	return nil
+}
+
 // Validate checks the restricted bundle profile without running a container.
 func Validate(dir string) error { _, err := Load(dir); return err }
 
