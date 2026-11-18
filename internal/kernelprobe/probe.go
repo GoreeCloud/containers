@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -78,11 +80,33 @@ func Compare(parent, child map[string]string, childUID int) bool {
 		return false
 	}
 	for _, kind := range names {
-		if parent[kind] == "" || child[kind] == "" || parent[kind] == child[kind] {
+		if !validNamespaceRef(kind, parent[kind]) ||
+			!validNamespaceRef(kind, child[kind]) || parent[kind] == child[kind] {
 			return false
 		}
 	}
 	return true
+}
+
+// validNamespaceRef requires the exact Linux /proc/self/ns/<kind> link form.
+// Comparing two arbitrary unequal strings is not evidence of namespace
+// isolation. The inode must be a positive, representable decimal uint64.
+func validNamespaceRef(kind, ref string) bool {
+	prefix := kind + ":["
+	if !strings.HasPrefix(ref, prefix) || !strings.HasSuffix(ref, "]") {
+		return false
+	}
+	inode := strings.TrimSuffix(strings.TrimPrefix(ref, prefix), "]")
+	if inode == "" || len(inode) > 20 {
+		return false
+	}
+	for _, ch := range inode {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	id, err := strconv.ParseUint(inode, 10, 64)
+	return err == nil && id != 0
 }
 
 // Probe tests kernel namespace inode separation only. No OCI rootfs,
