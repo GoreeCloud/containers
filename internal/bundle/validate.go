@@ -81,7 +81,7 @@ type Mount struct {
 // before the external runtime can be called or its mutation journal written.
 // This checks minimum paths, NOT OCI confinement or proc/dev mount security.
 func ValidateRuntimeLayout(dir string, spec *Spec) error {
-	if spec == nil || spec.Root == nil ||
+	if spec == nil || spec.Root == nil || spec.Process == nil ||
 		!filepath.IsLocal(spec.Root.Path) || filepath.Clean(spec.Root.Path) != spec.Root.Path {
 		return errors.New("invalid OCI guest rootfs path")
 	}
@@ -102,6 +102,29 @@ func ValidateRuntimeLayout(dir string, spec *Spec) error {
 		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("OCI guest rootfs requires a real %s directory", name)
 		}
+	}
+	// The preview process requires an absolute entrypoint. Check its
+	// presence and executable mode through an os.Root anchored inside the
+	// guest: a host-path symlink must not make an empty rootfs look runnable.
+	// This is a preflight, not an immutable bundle snapshot or an attestation
+	// that the dynamic linker / interpreter is available at OCI start time.
+	guest, err := root.OpenRoot(spec.Root.Path)
+	if err != nil {
+		return errors.New("OCI guest rootfs unavailable for process preflight")
+	}
+	defer guest.Close()
+	executable := strings.TrimPrefix(spec.Process.Args[0], "/")
+	binaryInfo, err := guest.Stat(executable)
+	if err != nil || !binaryInfo.Mode().IsRegular() || binaryInfo.Mode().Perm()&0111 == 0 {
+		return errors.New("OCI guest executable missing, nonregular or not executable")
+	}
+	workdir := strings.TrimPrefix(spec.Process.Cwd, "/")
+	if workdir == "" {
+		workdir = "."
+	}
+	dirInfo, err := guest.Stat(workdir)
+	if err != nil || !dirInfo.IsDir() {
+		return errors.New("OCI guest working directory missing or not a directory")
 	}
 	return nil
 }
