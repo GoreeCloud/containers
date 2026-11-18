@@ -68,3 +68,29 @@ func TestRuntimeLayoutRejectsEntrypointSymlinkEscape(t *testing.T) {
 		t.Fatal("guest followed host symlink")
 	}
 }
+
+func TestRuntimeLayoutRejectsUnvalidatedProcessMetadataWithoutPanic(t *testing.T) {
+	dir := setup(t, safeSpec)
+	guestBase(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "rootfs", "bin", "true"), []byte("test fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		spec *Spec
+	}{
+		{"nil", nil},
+		{"missing_process", &Spec{Root: &Root{Path: "rootfs"}}},
+		{"missing_args", &Spec{Root: &Root{Path: "rootfs"}, Process: &Process{Cwd: "/"}}},
+		{"relative_entrypoint", &Spec{Root: &Root{Path: "rootfs"}, Process: &Process{Cwd: "/", Args: []string{"bin/true"}}}},
+		{"relative_workdir", &Spec{Root: &Root{Path: "rootfs"}, Process: &Process{Cwd: "relative", Args: []string{"/bin/true"}}}},
+		{"bundle_as_rootfs", &Spec{Root: &Root{Path: "."}, Process: &Process{Cwd: "/", Args: []string{"/bin/true"}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateRuntimeLayout(dir, tc.spec); err == nil {
+				t.Fatal("unvalidated guest process or root metadata accepted")
+			}
+		})
+	}
+}
