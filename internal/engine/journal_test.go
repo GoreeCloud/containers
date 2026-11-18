@@ -60,6 +60,45 @@ func TestJournalFailClosedAfterUncertainRuntimeFailure(t *testing.T) {
 		t.Fatal("second mutation ran with unresolved prior operation")
 	}
 }
+func TestJournaledCreateVerifiesGuestStateBeforeClearingRecovery(t *testing.T) {
+	// A runtime may return exit 0 from "create" but immediately report
+	// "stopped" because guest init died. This must remain recovery-required.
+	root := journalFixture(t)
+	fake := &fakeRunner{status: "stopped"}
+	engine, err := New("/usr/bin/runc", root, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.lockMutations = true // Test runner, with production journal behavior.
+	_, err = engine.call(context.Background(), "create", "--bundle", "/synthetic/bundle", "worker")
+	if !errors.Is(err, ErrUnresolvedMutation) {
+		t.Fatalf("early-exited OCI create wrongly accepted: %v", err)
+	}
+	marker, err := ReadPendingMutation(context.Background(), root, "worker")
+	if err != nil || !marker.Pending || !marker.RecoveryRequired || marker.Operation != "create" {
+		t.Fatalf("uncertain create must retain recovery journal: %+v, %v", marker, err)
+	}
+	if _, err := engine.call(context.Background(), "create", "--bundle", "/synthetic/bundle", "worker"); !errors.Is(err, ErrUnresolvedMutation) {
+		t.Fatal("unresolved first create allowed another mutation")
+	}
+
+	// Successful created-state readback is allowed to clear the marker.
+	goodRoot := journalFixture(t)
+	good := &fakeRunner{status: "created"}
+	healthy, err := New("/usr/bin/runc", goodRoot, good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthy.lockMutations = true
+	if _, err := healthy.call(context.Background(), "create", "--bundle", "/synthetic/bundle", "worker"); err != nil {
+		t.Fatalf("created guest wrongly rejected: %v", err)
+	}
+	status, err := ReadPendingMutation(context.Background(), goodRoot, "worker")
+	if err != nil || status.Pending || status.RecoveryRequired {
+		t.Fatalf("completed create marker not cleared: %+v, %v", status, err)
+	}
+}
+
 func TestJournalRejectsMalformedOrSymlinkedMarkers(t *testing.T) {
 	root := journalFixture(t)
 	name := filepath.Join(root, "journal", "worker.pending")
