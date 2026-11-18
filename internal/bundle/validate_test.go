@@ -74,6 +74,12 @@ func TestOCIWorkflowLayoutPreflightDoesNotAcceptMissingOrSymlinkedDevices(t *tes
 			t.Fatal(err)
 		}
 	}
+	// A synthetically runnable entrypoint is required in addition to /dev
+	// and /proc, without executing any guest process in this unit test.
+	guestBase(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "rootfs", "bin", "true"), []byte("inert fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := ValidateRuntimeLayout(dir, spec); err != nil {
 		t.Fatal(err)
 	}
@@ -157,6 +163,12 @@ func TestPrivateDeviceMountRuntimeLayout(t *testing.T) {
 	}
 	pts := filepath.Join(dir, "rootfs", "dev", "pts")
 	if err := os.Mkdir(pts, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// A synthetically runnable entrypoint is required in addition to /dev
+	// and /proc, without executing any guest process in this unit test.
+	guestBase(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "rootfs", "bin", "true"), []byte("inert fixture"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := ValidateRuntimeLayout(dir, spec); err != nil {

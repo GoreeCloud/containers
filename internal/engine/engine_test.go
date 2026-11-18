@@ -125,6 +125,14 @@ func TestCreateRejectsMissingRuntimeDirectoriesBeforeCallingRuntime(t *testing.T
 			t.Fatal(err)
 		}
 	}
+	// A guest must also contain a real executable before the fake runner
+	// can be reached. This test never launches the guest.
+	if err := os.Mkdir(filepath.Join(dir, "rootfs", "bin"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rootfs", "bin", "true"), []byte("inert fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := engine.Create(context.Background(), "preflight", dir); err != nil {
 		t.Fatal(err)
 	}
