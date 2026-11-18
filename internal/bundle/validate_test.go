@@ -88,6 +88,91 @@ func TestOCIWorkflowLayoutPreflightDoesNotAcceptMissingOrSymlinkedDevices(t *tes
 	}
 }
 
+// Private device mount support is opt-in and intentionally narrower than
+// the general runc spec. Never permit bind mounts or uncontrolled /dev access.
+func TestPrivateDeviceMountAdmissionAndDenial(t *testing.T) {
+	const privateDeviceMounts = `"mounts":[
+      {"destination":"/dev","type":"tmpfs","source":"tmpfs",
+       "options":["nosuid","noexec","nodev","mode=755","size=65536k"]},
+      {"destination":"/dev/pts","type":"devpts","source":"devpts",
+       "options":["nosuid","noexec","newinstance","ptmxmode=0666","mode=0620"]}
+    ],`
+	good := strings.Replace(safeSpec, `"linux":`, privateDeviceMounts+`"linux":`, 1)
+	if err := Validate(setup(t, good)); err != nil {
+		t.Fatalf("rejected exact optional private /dev profile: %v", err)
+	}
+	bad := map[string]string{
+		"missing private /dev mount": strings.Replace(good,
+			`{"destination":"/dev","type":"tmpfs","source":"tmpfs",
+       "options":["nosuid","noexec","nodev","mode=755","size=65536k"]},`, "", 1),
+		"missing paired devpts": strings.Replace(good,
+			`"size=65536k"]},
+      {"destination":"/dev/pts","type":"devpts","source":"devpts",
+       "options":["nosuid","noexec","newinstance","ptmxmode=0666","mode=0620"]}`,
+			`"size=65536k"]}`, 1),
+		"unbounded /dev":               strings.Replace(good, `"size=65536k"`, `"size=9999999999"`, 1),
+		"missing nodev":                strings.Replace(good, `"nodev",`, "", 1),
+		"missing noexec":               strings.Replace(good, `"noexec",`, "", 1),
+		"unsafe /dev source":           strings.Replace(good, `"source":"tmpfs"`, `"source":"/dev"`, 1),
+		"bind host devices":            strings.Replace(good, `"type":"tmpfs"`, `"type":"bind"`, 1),
+		"devpts without newinstance":   strings.Replace(good, `"newinstance",`, "", 1),
+		"unreviewed devpts GID":        strings.Replace(good, `"mode=0620"`, `"gid=5"`, 1),
+		"insecure ptmx mode":           strings.Replace(good, `"ptmxmode=0666"`, `"ptmxmode=0777"`, 1),
+		"unapproved mount destination": strings.Replace(good, `"/dev/pts"`, `"/sys"`, 1),
+		"duplicate /dev": strings.Replace(good, `"mounts":[`,
+			`"mounts":[{"destination":"/dev","type":"tmpfs","source":"tmpfs",
+       "options":["nosuid","noexec","nodev","mode=755","size=65536k"]},`, 1),
+	}
+	for name, raw := range bad {
+		t.Run(name, func(t *testing.T) {
+			if raw == good {
+				t.Fatal("negative fixture failed to mutate reviewed OCI profile")
+			}
+			if err := Validate(setup(t, raw)); err == nil {
+				t.Fatal("unsafe private device profile was admitted")
+			}
+		})
+	}
+}
+
+func TestPrivateDeviceMountRuntimeLayout(t *testing.T) {
+	mounts := `"mounts":[
+      {"destination":"/dev","type":"tmpfs","source":"tmpfs",
+       "options":["nosuid","noexec","nodev","mode=755","size=65536k"]},
+      {"destination":"/dev/pts","type":"devpts","source":"devpts",
+       "options":["nosuid","noexec","newinstance","ptmxmode=0666","mode=0620"]}
+    ],`
+	dir := setup(t, strings.Replace(safeSpec, `"linux":`, mounts+`"linux":`, 1))
+	spec, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"dev", "proc"} {
+		if err := os.Mkdir(filepath.Join(dir, "rootfs", n), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ValidateRuntimeLayout(dir, spec); err == nil {
+		t.Fatal("accepted missing /dev/pts with explicit devpts mount")
+	}
+	pts := filepath.Join(dir, "rootfs", "dev", "pts")
+	if err := os.Mkdir(pts, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateRuntimeLayout(dir, spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(pts); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/dev/pts", pts); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateRuntimeLayout(dir, spec); err == nil {
+		t.Fatal("accepted symlinked guest /dev/pts mount destination")
+	}
+}
+
 func TestTooLargeAndSymlink(t *testing.T) {
 	dir := setup(t, safeSpec+strings.Repeat(" ", MaxConfigBytes))
 	if err := Validate(dir); err == nil {

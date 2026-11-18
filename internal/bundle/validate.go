@@ -90,7 +90,13 @@ func ValidateRuntimeLayout(dir string, spec *Spec) error {
 		return errors.New("unable to open OCI bundle for layout preflight")
 	}
 	defer root.Close()
-	for _, name := range []string{"dev", "proc"} {
+	needed := []string{"dev", "proc"}
+	for _, m := range spec.Mounts {
+		if m.Destination == "/dev/pts" && m.Type == "devpts" {
+			needed = append(needed, "dev/pts")
+		}
+	}
+	for _, name := range needed {
 		path := filepath.Join(spec.Root.Path, name)
 		info, err := root.Lstat(path)
 		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -249,15 +255,33 @@ func validateSpec(s *Spec, root *os.Root) error {
 				return errors.New("unsupported proc mount policy")
 			}
 		case "tmpfs":
-			if m.Destination != "/tmp" || m.Source != "tmpfs" || !onlyOptions(m.Options, "nosuid", "noexec", "nodev", "size=67108864", "mode=1777") {
-				return errors.New("unsupported tmpfs mount policy")
+			switch m.Destination {
+			case "/tmp":
+				if m.Source != "tmpfs" || !onlyOptions(m.Options, "nosuid", "noexec", "nodev", "size=67108864", "mode=1777") ||
+					!hasOption(m.Options, "size=67108864") || !hasOption(m.Options, "nosuid") || !hasOption(m.Options, "nodev") {
+					return errors.New("unsupported tmpfs mount policy")
+				}
+			case "/dev":
+				// Rootless runc creates /dev symlinks in a private guest tmpfs.
+				// Reject host binds, unbounded memory, and custom device access.
+				if m.Source != "tmpfs" || !exactOptions(m.Options, "nosuid", "noexec", "nodev", "mode=755", "size=65536k") {
+					return errors.New("unsupported private /dev tmpfs policy")
+				}
+			default:
+				return errors.New("unsupported tmpfs destination")
 			}
-			if !hasOption(m.Options, "size=67108864") || !hasOption(m.Options, "nosuid") || !hasOption(m.Options, "nodev") {
-				return errors.New("tmpfs must be memory-limited and protected")
+		case "devpts":
+			if m.Destination != "/dev/pts" || m.Source != "devpts" ||
+				!exactOptions(m.Options, "nosuid", "noexec", "newinstance", "ptmxmode=0666", "mode=0620") {
+				return errors.New("unsupported private devpts policy")
 			}
 		default:
 			return errors.New("unsupported mount type")
 		}
+	}
+	// Private pseudo-terminals require a separately mounted bounded /dev.
+	if destinations["/dev"] != destinations["/dev/pts"] {
+		return errors.New("private /dev and /dev/pts mounts must be paired")
 	}
 	if len(s.Linux.Seccomp.Flags) > 0 {
 		return errors.New("seccomp flags must be reviewed before support")
@@ -300,6 +324,9 @@ func hasOption(options []string, wanted string) bool {
 		}
 	}
 	return false
+}
+func exactOptions(options []string, required ...string) bool {
+	return len(options) == len(required) && onlyOptions(options, required...)
 }
 func onlyOptions(options []string, allowed ...string) bool {
 	seen := map[string]bool{}

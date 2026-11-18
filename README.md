@@ -67,7 +67,7 @@ source_sha="$(./gcontainers stack plan examples/native-stack.json | sed -nE 's/^
 ./gcontainers validate /path/to/oci-bundle
 ```
 
-For experimental `oci create`, the preview also checks that `rootfs/dev` and `rootfs/proc` are real directories (not missing or symlinked) **before** invoking `runc`/`crun` or writing the mutation journal. This rejects incomplete disposable OCI fixtures earlier; it does **not** prove that a runtime will successfully create a guest, that `/proc` is mounted safely, or that isolation and rollback gates pass.
+For experimental `oci create`, the preview checks that `rootfs/dev` and `rootfs/proc` are real directories (not missing or symlinked) **before** invoking `runc`/`crun` or writing the mutation journal. An optional, **experimental** rootless `/dev` profile permits only a private 64 MiB `tmpfs` with exact `nosuid,noexec,nodev,mode=755,size=65536k` options **paired** with a private `/dev/pts` `devpts` mount with exact `nosuid,noexec,newinstance,ptmxmode=0666,mode=0620` options. That profile additionally requires a real nonsymlink `rootfs/dev/pts` directory and continues to reject host bind mounts, custom devices and privileged syscalls. An exact mount allowlist is not proof of device-node or process isolation; **real rootless OCI execution using these mounts has not yet passed independent acceptance**. Do not use this profile for production workloads.
 
 Running an experimental rootless bundle also requires a maintained `crun` or `runc` installation, a private `XDG_RUNTIME_DIR`, a suitable Linux kernel, correctly mapped UID/GID ranges, rootfs, and an OCI spec satisfying the preview policy. Execution is not recommended on production hosts.
 
