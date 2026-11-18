@@ -11,8 +11,8 @@ import (
 func TestCompareDistinctAndIncompleteKernelNamespaces(t *testing.T) {
 	parent, child := map[string]string{}, map[string]string{}
 	for _, n := range names {
-		parent[n] = "before-" + n
-		child[n] = "after-" + n
+		parent[n] = n + ":[123000]"
+		child[n] = n + ":[123001]"
 	}
 	if !Compare(parent, child, 0) {
 		t.Fatal("distinct mapped namespaces rejected")
