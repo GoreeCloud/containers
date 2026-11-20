@@ -10,6 +10,7 @@ GoreeCloud Containers is being built as the eventual default containerization so
 
 - `gcontainers doctor`: a read-only report of local Linux and OCI runtime prerequisites.
 - `gcontainers validate <bundle-directory>`: fail-closed parsing of a restricted rootless OCI bundle policy. Includes file-size and JSON nesting limits, duplicate-key rejection, and restrictions on host namespaces, root filesystem, capabilities, devices, hooks, writable/bind mounts, and seccomp defaults.
+- `gcontainers preflight <bundle-directory>`: inert, read-only policy and guest-layout inspection with redacted failure reasons. Checks the executable, required guest directories, ELF interpreter and bounded nested shebang chain; rejects `/usr/bin/env` and `/bin/env` secondary command resolution. It **never invokes an OCI runtime** and explicitly returns `isolationVerified=false` and `deploymentAuthorized=false` even on a positive result.
 - `gcontainers oci create|start|state|stop|delete`: a GoreeCloud-owned lifecycle adapter that invokes an external, replaceable OCI low-level runtime (`crun` or `runc`) directly, without Docker, Podman, containerd, a shell, or a background daemon. Mutations require `--experimental`; runtime state is stored in a private per-user directory and deletion is never forced.
 - OCI state reads strictly parse bounded runtime JSON and return only container ID, lifecycle state and PID. The reviewed `runc 1.5.3` response additionally includes string metadata `created`, `owner` and `rootfs`; these fields are recognized but **never displayed**, while unknown metadata, duplicate keys and mismatched IDs remain rejected. This compatibility allowance is not proof of successful OCI workload execution or release readiness.
 - A journaled OCI `create` now performs an immediate strictly decoded `state` readback: a low-level runtime exit status 0 with a guest already `stopped` is **not** a successful container creation. In that case the pending journal is retained for operator recovery; passing this check does not guarantee the guest will remain alive or that subsequent `start` and confinement have been accepted.
@@ -67,6 +68,9 @@ source_sha="$(./gcontainers stack plan examples/native-stack.json | sed -nE 's/^
 # First-party inert Linux rootless namespace check (no OCI workload):
 ./gcontainers kernel-probe
 ./gcontainers validate /path/to/oci-bundle
+# Inert guest layout check; nonzero exit for rejected policy or missing guest files.
+# A successful preflight is NOT evidence that the guest can run or is secure.
+./gcontainers preflight /path/to/oci-bundle
 ```
 
 For experimental `oci create`, the preview checks that `rootfs/dev` and `rootfs/proc` are real directories (not missing or symlinked) **before** invoking `runc`/`crun` or writing the mutation journal. An optional, **experimental** rootless `/dev` profile permits only a private 64 MiB `tmpfs` with exact `nosuid,noexec,nodev,mode=755,size=65536k` options **paired** with a private `/dev/pts` `devpts` mount with exact `nosuid,noexec,newinstance,ptmxmode=0666,mode=0620` options. That profile additionally requires a real nonsymlink `rootfs/dev/pts` directory and continues to reject host bind mounts, custom devices and privileged syscalls. An exact mount allowlist is not proof of device-node or process isolation; **real rootless OCI execution using these mounts has not yet passed independent acceptance**. Do not use this profile for production workloads.
