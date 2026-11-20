@@ -125,6 +125,9 @@ func ValidateRuntimeLayout(dir string, spec *Spec) error {
 	if err := validateGuestELFInterpreter(guest, executable); err != nil {
 		return err
 	}
+	if err := validateGuestScriptInterpreter(guest, executable); err != nil {
+		return err
+	}
 	workdir := strings.TrimPrefix(spec.Process.Cwd, "/")
 	if workdir == "" {
 		workdir = "."
