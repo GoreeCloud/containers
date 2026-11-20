@@ -122,10 +122,7 @@ func ValidateRuntimeLayout(dir string, spec *Spec) error {
 	if err != nil || !binaryInfo.Mode().IsRegular() || binaryInfo.Mode().Perm()&0111 == 0 {
 		return errors.New("OCI guest executable missing, nonregular or not executable")
 	}
-	if err := validateGuestELFInterpreter(guest, executable); err != nil {
-		return err
-	}
-	if err := validateGuestScriptInterpreter(guest, executable); err != nil {
+	if err := validateGuestEntrypoint(guest, executable); err != nil {
 		return err
 	}
 	workdir := strings.TrimPrefix(spec.Process.Cwd, "/")
