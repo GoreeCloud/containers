@@ -55,6 +55,8 @@ func run(args []string, out io.Writer) error {
 			return errors.New("doctor takes no arguments")
 		}
 		return doctor(out)
+	case "preflight":
+		return bundlePreflight(args[1:], out)
 	case "validate":
 		if len(args) != 2 {
 			return errors.New("usage: gcontainers validate BUNDLE_DIRECTORY")
@@ -185,6 +187,7 @@ gcontainers host inspect
   gcontainers stack preflight OLD_STACK_JSON NEW_STACK_JSON --expected-current-sha256 sha256:HEX --cpu-milli N --memory-mib N --max-instances N
   gcontainers stack capacity NATIVE_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
   gcontainers validate BUNDLE_DIRECTORY
+  gcontainers preflight BUNDLE_DIRECTORY  # read-only policy + guest layout diagnostics; no runtime
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
   gcontainers oci start|stop|delete --id NAME --experimental
   gcontainers oci state --id NAME
