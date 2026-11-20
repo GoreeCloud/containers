@@ -41,6 +41,7 @@ func TestBundlePreflightIsPrivateNonMutatingAndFailsClosed(t *testing.T) {
 			ReadOnly             bool   `json:"readOnly"`
 			PolicyValid          bool   `json:"policyValid"`
 			GuestLayoutValid     bool   `json:"guestLayoutValid"`
+			SeccompExecveListed  bool   `json:"seccompExecveListed"`
 			RuntimeInvoked       bool   `json:"runtimeInvoked"`
 			IsolationVerified    bool   `json:"isolationVerified"`
 			DeploymentAuthorized bool   `json:"deploymentAuthorized"`
@@ -49,7 +50,8 @@ func TestBundlePreflightIsPrivateNonMutatingAndFailsClosed(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 			t.Fatal(err)
 		}
-		if !report.ReadOnly || report.RuntimeInvoked || report.IsolationVerified ||
+		if (report.SeccompExecveListed != (reason == "runtime_and_isolation_unverified")) ||
+			!report.ReadOnly || report.RuntimeInvoked || report.IsolationVerified ||
 			report.DeploymentAuthorized || report.PolicyValid != expectedPolicy ||
 			report.GuestLayoutValid != expectedLayout || report.Reason != reason {
 			t.Fatalf("unsafe or inconsistent result: %+v", report)
@@ -67,6 +69,16 @@ func TestBundlePreflightIsPrivateNonMutatingAndFailsClosed(t *testing.T) {
 	}
 	binary := filepath.Join(dir, "rootfs", "bin", "true")
 	if err := os.WriteFile(binary, []byte("synthetic inert process"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	// The default-deny example is structurally valid but cannot execute a
+	// guest process without an explicit execve permission.
+	check(true, true, "seccomp_execve_unlisted", true)
+	withExecve := strings.Replace(preflightOCI, `"defaultAction":"SCMP_ACT_ERRNO"`, `"defaultAction":"SCMP_ACT_ERRNO","syscalls":[{"names":["execve"],"action":"SCMP_ACT_ALLOW"}]`, 1)
+	if withExecve == preflightOCI {
+		t.Fatal("failed to construct positive seccomp fixture")
+	}
+	if err := os.WriteFile(cfg, []byte(withExecve), 0600); err != nil {
 		t.Fatal(err)
 	}
 	check(true, true, "runtime_and_isolation_unverified", false)
