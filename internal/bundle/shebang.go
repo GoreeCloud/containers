@@ -10,8 +10,8 @@ import (
 )
 
 // inspectGuestShebang reads at most 513 bytes from one anchored entrypoint.
-// It does not evaluate command arguments or resolve /usr/bin/env secondary
-// commands. All returned interpreter paths are clean and guest-absolute.
+// It never executes arguments and refuses env-style secondary command
+// resolution. All returned interpreter paths are clean and guest-absolute.
 func inspectGuestShebang(guest *os.Root, executable string) (string, error) {
 	f, err := guest.Open(executable)
 	if err != nil {
@@ -46,6 +46,13 @@ func inspectGuestShebang(guest *os.Root, executable string) (string, error) {
 	path := parts[0]
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return "", errors.New("OCI guest shebang interpreter path is unsafe")
+	}
+	// env launches a secondary executable found through its runtime PATH.
+	// That command is neither tied to a guest-absolute path nor verified by
+	// the bounded chain preflight. Refuse this ambiguous form until a safe
+	// guest-rooted resolver exists, rather than misreporting it as runnable.
+	if path == "/usr/bin/env" || path == "/bin/env" {
+		return "", errors.New("OCI guest env-style shebang requires unverified secondary interpreter")
 	}
 	return path, nil
 }
