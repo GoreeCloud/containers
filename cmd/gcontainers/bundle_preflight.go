@@ -20,6 +20,7 @@ func bundlePreflight(args []string, out io.Writer) error {
 		ReadOnly             bool   `json:"readOnly"`
 		PolicyValid          bool   `json:"policyValid"`
 		GuestLayoutValid     bool   `json:"guestLayoutValid"`
+		SeccompExecveListed  bool   `json:"seccompExecveListed"`
 		RuntimeInvoked       bool   `json:"runtimeInvoked"`
 		IsolationVerified    bool   `json:"isolationVerified"`
 		DeploymentAuthorized bool   `json:"deploymentAuthorized"`
@@ -42,6 +43,18 @@ func bundlePreflight(args []string, out io.Writer) error {
 		return errors.New("OCI guest layout preflight rejected input")
 	}
 	report.GuestLayoutValid = true
+	// A default-deny seccomp filter lacking execve can never launch the
+	// configured guest process. Refuse an apparently successful preflight.
+	// An explicit execve rule is necessary but does not prove runnable ABI,
+	// all required syscalls, security policy enforcement or containment.
+	report.SeccompExecveListed = bundle.HasExplicitGuestExecveAllowance(spec)
+	if !report.SeccompExecveListed {
+		report.Reason = "seccomp_execve_unlisted"
+		if writeErr := json.NewEncoder(out).Encode(report); writeErr != nil {
+			return writeErr
+		}
+		return errors.New("OCI guest bootstrap seccomp preflight rejected input")
+	}
 	report.Reason = "runtime_and_isolation_unverified"
 	return json.NewEncoder(out).Encode(report)
 }
