@@ -104,11 +104,15 @@ func RunJournaledMutation(ctx context.Context, stateRoot, id, op string, action 
 	if writeErr == nil {
 		writeErr = pending.Sync()
 	}
+	markerInfo, statErr := pending.Stat()
 	closeErr := pending.Close()
-	if writeErr != nil || closeErr != nil {
+	if writeErr != nil || statErr != nil || closeErr != nil {
 		return nil, errors.New("unable to persist OCI mutation marker; recovery review required")
 	}
 	if err := syncJournalDirectory(root); err != nil {
+		return nil, err
+	}
+	if err := verifyPendingIdentity(root, name, markerInfo); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -118,6 +122,12 @@ func RunJournaledMutation(ctx context.Context, stateRoot, id, op string, action 
 	if err != nil {
 		return nil, fmt.Errorf("%w: runtime returned uncertain state: %v", ErrUnresolvedMutation, err)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("%w: operation context ended before completion", ErrUnresolvedMutation)
+	}
+	if err := verifyPendingIdentity(root, name, markerInfo); err != nil {
+		return nil, err
+	}
 	if err := root.Remove(name); err != nil {
 		return nil, fmt.Errorf("OCI operation succeeded but journal cleanup needs recovery: %w", err)
 	}
@@ -126,6 +136,24 @@ func RunJournaledMutation(ctx context.Context, stateRoot, id, op string, action 
 	}
 	return result, nil
 }
+
+// Detect marker replacement before invoking or committing a mutation.
+// This is a cooperative safety check, not atomic compare-and-unlink or
+// protection against an actor with the same UID.
+func verifyPendingIdentity(root *os.Root, name string, initial os.FileInfo) error {
+	current, err := root.Lstat(name)
+	if err != nil || initial == nil || !os.SameFile(initial, current) ||
+		!current.Mode().IsRegular() || current.Mode().Perm()&0077 != 0 ||
+		current.Size() != initial.Size() || !current.ModTime().Equal(initial.ModTime()) {
+		return fmt.Errorf("%w: journal marker changed", ErrUnresolvedMutation)
+	}
+	st, ok := current.Sys().(*syscall.Stat_t)
+	if !ok || st.Uid != uint32(os.Geteuid()) || st.Nlink != 1 {
+		return fmt.Errorf("%w: journal marker ownership changed", ErrUnresolvedMutation)
+	}
+	return nil
+}
+
 func syncJournalDirectory(root *os.Root) error {
 	dir, err := root.Open("journal")
 	if err != nil {
@@ -180,6 +208,12 @@ func ReadPendingMutation(ctx context.Context, stateRoot, id string) (PendingMuta
 	raw, err := io.ReadAll(io.LimitReader(f, 513))
 	if err != nil || int64(len(raw)) != info.Size() {
 		return empty, errors.New("pending marker changed while reading")
+	}
+	if err := verifyPendingIdentity(root, name, info); err != nil {
+		return empty, err
+	}
+	if err := ctx.Err(); err != nil {
+		return empty, err
 	}
 	if err := uniqueRuntimeJSON(raw); err != nil {
 		return empty, errors.New("ambiguous pending marker")
