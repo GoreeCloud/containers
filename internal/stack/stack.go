@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/GoreeCloud/containers/internal/jsonkey"
 	"io"
 	"os"
 	"path/filepath"
@@ -341,10 +342,10 @@ func walk(d *json.Decoder, depth int) error {
 				return err
 			}
 			name, ok := k.(string)
-			if !ok || keys[name] {
+			if !ok || keys[jsonkey.Fold(name)] {
 				return errors.New("duplicate or invalid JSON key")
 			}
-			keys[name] = true
+			keys[jsonkey.Fold(name)] = true
 			if err := walk(d, depth+1); err != nil {
 				return err
 			}
