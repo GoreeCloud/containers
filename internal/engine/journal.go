@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/GoreeCloud/containers/internal/regularinput"
 	"io"
 	"os"
 	"path/filepath"
@@ -196,7 +197,7 @@ func ReadPendingMutation(ctx context.Context, stateRoot, id string) (PendingMuta
 	if !ok || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
 		return empty, errors.New("pending marker ownership or hardlink unsafe")
 	}
-	f, err := root.Open(name)
+	f, err := regularinput.Open(root, name, info)
 	if err != nil {
 		return empty, err
 	}
