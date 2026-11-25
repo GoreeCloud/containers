@@ -50,6 +50,8 @@ func run(args []string, out io.Writer) error {
 			return errors.New("kernel-probe takes no flags")
 		}
 		return runKernelProbe(out)
+	case "serve-local":
+		return localAPI(args[1:])
 	case "doctor":
 		if len(args) != 1 {
 			return errors.New("doctor takes no arguments")
