@@ -52,6 +52,8 @@ go build -o gcontainers ./cmd/gcontainers
 ./gcontainers stack plan examples/native-stack.json
 # Advisory reverse-dependency stop stages; no workloads stopped:
 ./gcontainers stack shutdown-plan examples/native-stack.json
+# Advisory restart of a service and its transitive dependents:
+./gcontainers stack restart-plan examples/native-stack.json db
 # Offline, caller-supplied host budget; this is NOT a deployment authorization:
 ./gcontainers stack capacity examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16
 # Risk-impact reports remain advisory; no resources are reserved or deployed.
