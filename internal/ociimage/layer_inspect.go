@@ -29,6 +29,12 @@ type LayerReport struct {
 // It NEVER writes to disk, extracts, applies whiteouts, or executes anything.
 // This is NOT a full OCI layer implementation or safe-image certification.
 func InspectLayer(ctx context.Context, input io.Reader, mediaType string) (LayerReport, error) {
+	return inspectLayer(ctx, input, mediaType, nil)
+}
+
+// A consumer receives only validated entries; the outer operation must discard
+// all staging if any later archive framing, digest, or descriptor check fails.
+func inspectLayer(ctx context.Context, input io.Reader, mediaType string, consume func(string, bool, int64, io.Reader) error) (LayerReport, error) {
 	var empty LayerReport
 	if ctx == nil || input == nil {
 		return empty, errors.New("layer inspection requires context and input")
@@ -116,6 +122,11 @@ func InspectLayer(ctx context.Context, input io.Reader, mediaType string) (Layer
 			}
 			seen[name] = 'd'
 			report.DirectoryCount++
+			if consume != nil {
+				if err := consume(name, true, 0, reader); err != nil {
+					return empty, err
+				}
+			}
 		} else {
 			if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
 				return empty, errors.New("unsupported OCI layer entry type")
@@ -127,8 +138,24 @@ func InspectLayer(ctx context.Context, input io.Reader, mediaType string) (Layer
 			if header.Size > MaxLayerUnpackedBytes-report.UnpackedBytes {
 				return empty, errors.New("OCI layer exceeds total uncompressed size quota")
 			}
-			n, err := io.CopyN(io.Discard, reader, header.Size)
-			if err != nil || n != header.Size {
+			var n int64
+			if consume != nil {
+				limited := &io.LimitedReader{R: reader, N: header.Size}
+				if err := consume(name, false, header.Size, limited); err != nil {
+					return empty, err
+				}
+				if limited.N != 0 {
+					return empty, errors.New("incomplete OCI staging write")
+				}
+				n = header.Size
+			} else {
+				var err error
+				n, err = io.CopyN(io.Discard, reader, header.Size)
+				if err != nil {
+					return empty, errors.New("truncated OCI layer member")
+				}
+			}
+			if n != header.Size {
 				return empty, errors.New("truncated OCI layer member")
 			}
 			report.FileCount++
