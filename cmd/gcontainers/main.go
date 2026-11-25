@@ -90,6 +90,22 @@ func run(args []string, out io.Writer) error {
 		_, err = fmt.Fprintln(out, string(payload))
 		return err
 	case "stack":
+		if len(args) == 3 && args[1] == "shutdown-plan" {
+			spec, err := stack.Load(args[2])
+			if err != nil {
+				return err
+			}
+			plan, err := stack.PlanShutdown(spec)
+			if err != nil {
+				return err
+			}
+			encoded, err := json.MarshalIndent(plan, "", "  ")
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(out, string(encoded))
+			return err
+		}
 		if len(args) >= 4 && args[1] == "preflight" {
 			return stackPreflight(args[2:], out)
 		}
@@ -180,6 +196,7 @@ Usage:
 gcontainers host inspect
   gcontainers stack validate NATIVE_STACK_JSON
   gcontainers stack plan NATIVE_STACK_JSON
+  gcontainers stack shutdown-plan NATIVE_STACK_JSON  # advisory only
   gcontainers stack diff OLD_STACK_JSON NEW_STACK_JSON
   gcontainers stack impact OLD_STACK_JSON NEW_STACK_JSON
   gcontainers stack transition-capacity OLD_STACK_JSON NEW_STACK_JSON --cpu-milli N --memory-mib N --max-instances N

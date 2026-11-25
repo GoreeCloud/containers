@@ -115,6 +115,11 @@ jobs:
           grep -Fq '"deploymentAuthorized": false' "$d/host.json"
           grep -Fq '"delegationVerified": false' "$d/host.json"
           grep -Fq '"isolationVerified": false' "$d/host.json"
+          ./gcontainers stack shutdown-plan examples/native-stack.json > "$d/shutdown.json"
+          grep -Fq '"dryRun": true' "$d/shutdown.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/shutdown.json"
+          grep -Fq '"liveStateVerified": false' "$d/shutdown.json"
+          grep -Fq '"rollbackVerified": false' "$d/shutdown.json"
           ./gcontainers stack validate examples/native-stack.json
           ./gcontainers stack plan examples/native-stack.json > "$d/plan.json"
           grep -Fq '"dryRun": true' "$d/plan.json"
