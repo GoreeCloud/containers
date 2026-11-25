@@ -70,6 +70,8 @@ func run(args []string, out io.Writer) error {
 		}
 		_, err := fmt.Fprintln(out, "OCI bundle passed preview policy validation (not a security certification)")
 		return err
+	case "recovery-observe":
+		return recoveryObserve(args[1:], out)
 	case "oci":
 		return oci(args[1:], out)
 	case "image":
