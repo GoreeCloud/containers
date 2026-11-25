@@ -433,6 +433,9 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "fetch-blob" {
+		return registryBlob(args[1:], out)
+	}
 	if len(args) > 0 && args[0] == "stage-layer" {
 		return imageStageLayer(args[1:], out)
 	}
