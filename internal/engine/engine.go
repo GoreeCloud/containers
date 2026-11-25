@@ -105,8 +105,21 @@ func (ProcessRunner) Run(ctx context.Context, binary string, args ...string) ([]
 	}
 	cmd.WaitDelay = 2 * time.Second
 	output := &boundedOutput{}
-	cmd.Stdout = output
-	cmd.Stderr = output
+	// Lifecycle commands can leave the guest holding inherited stdio
+	// descriptors long after runc exits. Never attach capture pipes to
+	// mutations: they would make successful create look like a timeout.
+	// Read-only state/version calls still use bounded output capture.
+	mutation := len(args) >= 3 && args[0] == "--root" && journalOp(args[2])
+	if mutation {
+		sink, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			return nil, err
+		}
+		defer sink.Close()
+		cmd.Stdout, cmd.Stderr = sink, sink
+	} else {
+		cmd.Stdout, cmd.Stderr = output, output
+	}
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("OCI runtime operation failed: %w", err)
 	}

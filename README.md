@@ -112,6 +112,10 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - **Wardveil:** container security policy, image scanning, detection and response (future adapter).
 - **GoreeCloud UI:** the sole design authority for any future graphical management client.
 
+## Isolated real-runtime acceptance fixture
+
+On a disposable Linux x86-64 test environment, run `scripts/oci-smoke.sh --prepare-only` to build the first-party static guest and validate a fresh private bundle without launching it. The explicit `--execute` mode requires a root-owned upstream runc 1.5.3 matching the pinned official release digest. It tests create, running state after guest checks, SIGTERM, stopped state, delete and a clean journal. The fixture probes PID namespace, root mapping, no-new-privileges, seccomp, capability sets, read-only rootfs and denial of a socket syscall. The first successful isolated Linux x86-64 lifecycle was observed November 25, 2026 using upstream runc 1.5.3. The fixture's deny-default filter permits fstatfs and getdents64 for verified runtime bootstrap needs; it does not allow socket, mount, or namespace-changing syscalls. Host-side /proc status is checked against the actual guest process before stopping it. Never run this on production; failure retains private evidence and the guest self-expires. This is a narrow acceptance experiment, not Stable or proof of full confinement.
+
 ## Licensing
 
 The original GoreeCloud source in this repository is offered under the [MIT License](LICENSE). No third-party runtime source is vendored. OCI specifications and `crun`/`runc` are independent upstream projects with their own licenses.
