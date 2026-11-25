@@ -39,11 +39,15 @@ fi
 [[ "$(stat -c %u /usr/local/bin/runc)" == 0 ]]
 printf '%s  %s\n' 50dcc0b257d724fe07f3852c2dda52340223f038227c7572644eec870741223e /usr/local/bin/runc | sha256sum -c -
 "$gc" doctor
+mkdir -m 700 "$workspace/snapshots"
+"$gc" snapshot "$workspace/bundle" "$workspace/snapshots" --experimental > "$workspace/snapshot.json"
+snapshot="$(python3 -c 'import json,sys; s=json.load(sys.stdin); assert not s["immutable"] and not s["executionAuthorized"]; print(s["directory"])' < "$workspace/snapshot.json")"
+echo "PRIVATE_BUNDLE_SNAPSHOT_PASS"
 id="gc-smoke-$(printf %s "${workspace##*.}" | tr A-Z a-z)"
 state_root="$XDG_RUNTIME_DIR/goreecloud-containers"
 # Failures preserve the private workspace and journal. The guest self-expires.
 trap 'echo "OCI smoke incomplete: inspect private fixture at $workspace; no force cleanup performed" >&2' ERR
-"$gc" oci create --runtime runc --id "$id" --bundle "$workspace/bundle" --experimental
+"$gc" oci create --runtime runc --id "$id" --bundle "$snapshot" --experimental
 "$gc" oci state --runtime runc --id "$id" | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"]=="created"'
 "$gc" oci start --runtime runc --id "$id" --experimental
 sleep 2
