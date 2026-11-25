@@ -50,11 +50,15 @@ func run(args []string, out io.Writer) error {
 			return errors.New("kernel-probe takes no flags")
 		}
 		return runKernelProbe(out)
+	case "serve-local":
+		return localAPI(args[1:])
 	case "doctor":
 		if len(args) != 1 {
 			return errors.New("doctor takes no arguments")
 		}
 		return doctor(out)
+	case "snapshot":
+		return bundleSnapshot(args[1:], out)
 	case "preflight":
 		return bundlePreflight(args[1:], out)
 	case "validate":
@@ -66,6 +70,8 @@ func run(args []string, out io.Writer) error {
 		}
 		_, err := fmt.Fprintln(out, "OCI bundle passed preview policy validation (not a security certification)")
 		return err
+	case "recovery-observe":
+		return recoveryObserve(args[1:], out)
 	case "oci":
 		return oci(args[1:], out)
 	case "image":
