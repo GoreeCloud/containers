@@ -6,6 +6,22 @@ GoreeCloud Containers is being built as the eventual default containerization so
 
 > **Status: 0.1.0-dev / experimental foundation. Not production-ready.** No Docker/Podman replacement, image pull/build, daemon, Compose execution, networking, volumes, UI, remote control, or cluster orchestration is claimed. Do not migrate production containers.
 
+## Ecosystem deployment preference (founder direction, November 17, 2026)
+
+For **eligible GoreeCloud applications, services, APIs and other deployable workloads**, prefer an **installed, independently validated GoreeCloud Containers** instance as the deployment target. GoreeCloud Containers is the *intended first-choice platform*, **not a currently proven production runtime**: no accepted production runtime or release is established.
+
+Selection order, subject to the workload's verified compatibility and requirements:
+
+1. **GoreeCloud Containers**, only when an appropriate version is installed, secure, supported, and independently accepted on the authorized target host.
+2. **Docker and Docker Compose**, as supported, portable deployment alternatives.
+3. **Podman and Podman Compose**, including rootless operation where suitable.
+4. **Kubernetes**, where orchestration, scale, or multi-host requirements justify it.
+5. **Other fit-for-purpose methods**, including systemd/native host services, VMs, and approved managed hosting for workloads that cannot or should not run in containers.
+
+This preference does **not** require a rewrite of an otherwise portable OCI image or Compose deployment, the removal of existing Docker/Podman/Kubernetes support, or a speculative migration of a healthy live workload. Preserve application data, stateful recovery, networking controls, least privilege, secrets handling, signed/provenanced images, operational verification, and a tested rollback path. Record the reason when GoreeCloud Containers cannot be selected; retain a functioning supported fallback until native production acceptance is complete. Apply specific host placement and interim website-hosting policies separately.
+
+This is a documented deployment **decision rule**, not evidence of an installation, benchmark, production acceptance, rollout, or completed integration. The canonical GoreeCloud governing instructions remain authoritative.
+
 ## Implemented in this development branch
 
 - `gcontainers doctor`: a read-only report of local Linux and OCI runtime prerequisites.
@@ -110,6 +126,6 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - **Wardveil:** container security policy, image scanning, detection and response (future adapter).
 - **GoreeCloud UI:** the sole design authority for any future graphical management client.
 
-## Licensing
+## Licensing and provenance (source-admission review)
 
-The original GoreeCloud source in this repository is offered under the [MIT License](LICENSE). No third-party runtime source is vendored. OCI specifications and `crun`/`runc` are independent upstream projects with their own licenses.
+The documentation baseline is MIT-licensed, with the notice Copyright (c) 2026 GoreeCloud. The development branch carries an MIT proposal with the notice Copyright (c) 2026 GoreeCloud contributors. The candidate preserves both existing notices without asserting a new grant, changing existing rights, or declaring the engine provenance gate complete. The review must confirm copyright authority, origin of source and any third-party obligations before promotion. No third-party runtime source is vendored in the reviewed candidate; external OCI specifications, `crun` and `runc` remain independently licensed. See [source admission review](docs/SOURCE-ADMISSION.md).
