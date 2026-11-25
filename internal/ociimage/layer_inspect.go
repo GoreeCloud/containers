@@ -55,7 +55,8 @@ func InspectLayer(ctx context.Context, input io.Reader, mediaType string) (Layer
 		defer decoder.Close()
 		decoded = decoder
 	}
-	reader := tar.NewReader(&layerContextReader{ctx: ctx, reader: decoded})
+	framing := &layerContextReader{ctx: ctx, reader: decoded}
+	reader := tar.NewReader(framing)
 	seen := map[string]byte{}
 	implied := map[string]bool{}
 	var report LayerReport
@@ -63,12 +64,23 @@ func InspectLayer(ctx context.Context, input io.Reader, mediaType string) (Layer
 		if err := ctx.Err(); err != nil {
 			return empty, err
 		}
+		// archive/tar deliberately tolerates missing end markers and consumes
+		// extended metadata internally. Require explicit framing for this
+		// restricted preview; it is not a full OCI tar implementation.
+		before := framing.readBytes
+		padding := (512 - before%512) % 512
 		header, err := reader.Next()
 		if err == io.EOF {
+			if framing.readBytes-before != padding+1024 {
+				return empty, errors.New("OCI tar missing complete end-of-archive marker")
+			}
 			break
 		}
 		if err != nil {
 			return empty, fmt.Errorf("malformed OCI layer tar: %w", err)
+		}
+		if framing.readBytes-before != padding+512 {
+			return empty, errors.New("extended OCI tar header framing unsupported")
 		}
 		if report.FileCount+report.DirectoryCount >= MaxLayerEntries {
 			return empty, errors.New("OCI layer entry limit exceeded")
@@ -180,6 +192,7 @@ type layerContextReader struct {
 	ctx        context.Context
 	reader     io.Reader
 	emptyReads int
+	readBytes  int64
 }
 
 func (r *layerContextReader) Read(p []byte) (int, error) {
@@ -190,6 +203,7 @@ func (r *layerContextReader) Read(p []byte) (int, error) {
 	if n < 0 || n > len(p) {
 		return 0, errors.New("invalid OCI layer reader byte count")
 	}
+	r.readBytes += int64(n)
 	if n == 0 && err == nil {
 		r.emptyReads++
 		if r.emptyReads > 100 {
