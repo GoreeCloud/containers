@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/GoreeCloud/containers/internal/regularinput"
 	"io"
 	"os"
 	"path/filepath"
@@ -118,7 +119,7 @@ func (s *Store) Audit(ctx context.Context) (AuditReport, error) {
 		if info.Size() > maxAuditTotalBytes-result.TotalBytes {
 			return empty, errors.New("store audit aggregate quota exceeded")
 		}
-		file, err := root.Open(relative)
+		file, err := regularinput.Open(root, relative, info)
 		if err != nil {
 			return empty, err
 		}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/GoreeCloud/containers/internal/jsonkey"
+	"github.com/GoreeCloud/containers/internal/regularinput"
 	"io"
 	"os"
 	"path/filepath"
@@ -95,7 +96,7 @@ func Load(source string) (Spec, error) {
 	if !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > MaxBytes {
 		return Spec{}, errors.New("stack file must be non-symlink regular file no larger than 1 MiB")
 	}
-	f, err := root.Open(name)
+	f, err := regularinput.Open(root, name, info)
 	if err != nil {
 		return Spec{}, err
 	}

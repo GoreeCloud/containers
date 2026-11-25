@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/GoreeCloud/containers/internal/regularinput"
 	"io"
 	"os"
 	"path/filepath"
@@ -286,7 +287,7 @@ func (s *Store) Verify(ctx context.Context, digest string) (int64, error) {
 	if !ok || meta.Uid != uint32(os.Geteuid()) || meta.Nlink != 1 {
 		return 0, errors.New("stored blob owner or hardlinks unsafe")
 	}
-	file, err := root.Open(name)
+	file, err := regularinput.Open(root, name, checked)
 	if err != nil {
 		return 0, err
 	}

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/GoreeCloud/containers/internal/jsonkey"
+	"github.com/GoreeCloud/containers/internal/regularinput"
 	"io"
 	"os"
 	"path/filepath"
@@ -124,7 +125,7 @@ func readObject(root *os.Root, relative string, max int64) (map[string]json.RawM
 	if !fi.Mode().IsRegular() || fi.Size() > max {
 		return nil, errors.New("nonregular or oversize OCI metadata")
 	}
-	file, err := root.Open(relative)
+	file, err := regularinput.Open(root, relative, fi)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +374,7 @@ func (v *verifier) visit(d descriptor, depth int) error {
 	if metadata && d.Size > maxMetadataBytes {
 		return errors.New("OCI manifest/index metadata too large")
 	}
-	file, err := v.root.Open(relative)
+	file, err := regularinput.Open(v.root, relative, fi)
 	if err != nil {
 		return err
 	}
