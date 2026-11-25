@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/GoreeCloud/containers/internal/jsonkey"
 	"io"
 )
 
@@ -96,10 +97,10 @@ func visitRuntimeJSON(d *json.Decoder, depth int) error {
 				return err
 			}
 			s, ok := key.(string)
-			if !ok || seen[s] {
+			if !ok || seen[jsonkey.Fold(s)] {
 				return errors.New("duplicate OCI runtime JSON key")
 			}
-			seen[s] = true
+			seen[jsonkey.Fold(s)] = true
 			if err := visitRuntimeJSON(d, depth+1); err != nil {
 				return err
 			}
