@@ -52,6 +52,12 @@ import json,os,sys
 s=json.load(open(sys.argv[1]))
 assert s["status"]=="running" and s["pid"]>0
 p=s["pid"]
+# Compare identities, not just presence, without printing namespace inodes.
+for ns in ("user","mnt","pid","net","ipc","uts"):
+    host=os.stat(f"/proc/self/ns/{ns}")
+    guest=os.stat(f"/proc/{p}/ns/{ns}")
+    assert (host.st_dev,host.st_ino)!=(guest.st_dev,guest.st_ino), f"shared {ns} namespace"
+print("SIX_NAMESPACE_IDENTITIES_PASS")
 with open(f"/proc/{p}/status") as f:
     status=dict(line.rstrip().split(":",1) for line in f if ":" in line)
 assert status["Name"].strip()=="probe", "runtime init has not exec'd the test guest"
