@@ -31,6 +31,8 @@ jobs:
           go test -race -count=2 ./internal/engine -run '^TestRuntimeSafetyGate'
           go test -race -count=2 ./internal/ociimage -run '^TestLayoutReadIdentity'
           go test -race -count=2 ./internal/stack -run '^TestStackSourceIdentity'
+      - name: Compile and preflight first-party OCI acceptance fixture
+        run: bash scripts/oci-smoke.sh --prepare-only
       - name: Vet
         run: go vet ./...
       - name: Build

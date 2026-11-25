@@ -105,8 +105,21 @@ func (ProcessRunner) Run(ctx context.Context, binary string, args ...string) ([]
 	}
 	cmd.WaitDelay = 2 * time.Second
 	output := &boundedOutput{}
-	cmd.Stdout = output
-	cmd.Stderr = output
+	// Lifecycle commands can leave the guest holding inherited stdio
+	// descriptors long after runc exits. Never attach capture pipes to
+	// mutations: they would make successful create look like a timeout.
+	// Read-only state/version calls still use bounded output capture.
+	mutation := len(args) >= 3 && args[0] == "--root" && journalOp(args[2])
+	if mutation {
+		sink, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			return nil, err
+		}
+		defer sink.Close()
+		cmd.Stdout, cmd.Stderr = sink, sink
+	} else {
+		cmd.Stdout, cmd.Stderr = output, output
+	}
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("OCI runtime operation failed: %w", err)
 	}
@@ -154,6 +167,10 @@ func ValidateID(id string) error {
 	return nil
 }
 func (e *Engine) call(ctx context.Context, op string, args ...string) ([]byte, error) {
+	return e.callWithResources(ctx, nil, op, args...)
+}
+
+func (e *Engine) callWithResources(ctx context.Context, resources *bundle.Resources, op string, args ...string) ([]byte, error) {
 	argv := append([]string{"--root", e.StateRoot, op}, args...)
 	if e.lockMutations && journalOp(op) {
 		if len(args) == 0 {
@@ -183,6 +200,16 @@ func (e *Engine) call(ctx context.Context, op string, args ...string) ([]byte, e
 				if state.Status != "created" {
 					return nil, errors.New("post-create OCI runtime did not retain a created guest")
 				}
+				if resources != nil {
+					if err := verifyResourceLimits(ctx, state, resources); err != nil {
+						return nil, err
+					}
+					// The observer must still refer to the same created PID.
+					again, err := e.readState(ctx, id)
+					if err != nil || again != state {
+						return nil, errors.New("OCI resource observation changed during post-create verification")
+					}
+				}
 			}
 			return result, nil
 		})
@@ -210,7 +237,7 @@ func (e *Engine) Create(ctx context.Context, id, dir string) error {
 		if err != nil {
 			return err
 		}
-		_, err = e.call(ctx, "create", "--bundle", absolute, id)
+		_, err = e.callWithResources(ctx, spec.Linux.Resources, "create", "--bundle", absolute, id)
 		return err
 	})
 }

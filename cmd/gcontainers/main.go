@@ -207,6 +207,7 @@ Usage:
   gcontainers image audit --store ABS_EXISTING_STORE_DIR
   gcontainers image verify OCI_LAYOUT_DIR
   gcontainers image inspect-layer TAR_FILE tar|tar+gzip
+  gcontainers image stage-layer ABS_FILE tar|tar+gzip sha256:HEX DESCRIPTOR_BYTES PRIVATE_PARENT --experimental
   gcontainers image verify-layer ABS_TAR_FILE tar|tar+gzip sha256:EXPECTED_64_HEX [DESCRIPTOR_BYTES]
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
 gcontainers host inspect
@@ -426,6 +427,9 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "stage-layer" {
+		return imageStageLayer(args[1:], out)
+	}
 	if len(args) > 0 && args[0] == "verify-layer" {
 		return imageVerifyLayer(args[1:], out)
 	}
