@@ -228,7 +228,7 @@ func schemaTwo(obj map[string]json.RawMessage) error {
 }
 func descriptors(raw json.RawMessage) ([]map[string]json.RawMessage, error) {
 	var values []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &values); err != nil {
+	if err := json.Unmarshal(raw, &values); err != nil || values == nil {
 		return nil, errors.New("invalid descriptor array")
 	}
 	if len(values) > maxDescriptors {
@@ -250,7 +250,11 @@ func parseDescriptor(obj map[string]json.RawMessage) (descriptor, error) {
 	if !digestPattern.MatchString(d.Digest) {
 		return d, errors.New("invalid or unsupported OCI digest")
 	}
-	if err := json.Unmarshal(obj["size"], &d.Size); err != nil || d.Size < 0 || d.Size > maxBlobBytes {
+	size, ok := obj["size"]
+	if !ok || bytes.Equal(bytes.TrimSpace(size), []byte("null")) {
+		return d, errors.New("OCI descriptor size must be an integer")
+	}
+	if err := json.Unmarshal(size, &d.Size); err != nil || d.Size < 0 || d.Size > maxBlobBytes {
 		return d, errors.New("invalid or oversize OCI descriptor size")
 	}
 	if raw, ok := obj["urls"]; ok && string(raw) != "null" {
@@ -370,9 +374,9 @@ func (v *verifier) visit(d descriptor, depth int) error {
 	if !fi.Mode().IsRegular() || fi.Size() != d.Size {
 		return errors.New("OCI blob is nonregular or descriptor size differs")
 	}
-	metadata := d.Media == MediaManifest || d.Media == MediaIndex
+	metadata := d.Media == MediaManifest || d.Media == MediaIndex || d.Media == MediaConfig
 	if metadata && d.Size > maxMetadataBytes {
-		return errors.New("OCI manifest/index metadata too large")
+		return errors.New("OCI manifest/index/config metadata too large")
 	}
 	file, err := regularinput.Open(v.root, relative, fi)
 	if err != nil {
@@ -434,6 +438,12 @@ func (v *verifier) visit(d descriptor, depth int) error {
 	v.visited[key] = d
 	v.report.VerifiedBlobs++
 	v.report.VerifiedBytes += count
+	if d.Media == MediaConfig {
+		// Verify JSON structure from the exact hashed bytes; this is NOT
+		// complete OCI config semantics or runtime execution admission.
+		_, err := decodeObject(snapshot.Bytes())
+		return err
+	}
 	if d.Media != MediaManifest && d.Media != MediaIndex {
 		return nil
 	}
