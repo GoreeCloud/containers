@@ -112,6 +112,10 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - **Wardveil:** container security policy, image scanning, detection and response (future adapter).
 - **GoreeCloud UI:** the sole design authority for any future graphical management client.
 
+## Experimental inert layer staging
+
+`gcontainers image stage-layer ABS_FILE tar|tar+gzip sha256:HEX DESCRIPTOR_BYTES PRIVATE_PARENT --experimental` stages a single digest- and size-pinned archive into a newly generated private directory under an existing user-owned mode-0700 parent. It uses the existing strict layer parser in the same hashed stream, rejects links, whiteouts, devices, privilege metadata and unsupported framing, and writes regular files mode 0600. Failed validation cleans only the new tree; unexpected identity changes require manual review. It is inert data staging, not a complete OCI rootfs unpacker, immutable snapshot, authenticated provenance or execution authorization. No existing tree is overwritten.
+
 ## Restricted experimental cgroup resource profile
 
 Optional OCI Linux resources may declare all three bounded CPU quota/period (fixed 100000 microseconds), memory limit and PID limit values together. The real create path reads the actual process cgroup v2 membership and the exact cpu.max, memory.max and pids.max values before clearing the recovery journal. A mismatch fails closed and preserves recovery evidence. No host cgroup path, device rules or unbounded limits are accepted. On a nonproduction Linux laptop, `GC_SMOKE_RESOURCES=1 bash scripts/oci-smoke.sh --execute` verified a guest with 0.5 CPU, 64 MiB memory and 32 PIDs through creation, start, readback, stop and deletion. Resource exhaustion and hostile workload enforcement remain unverified.
