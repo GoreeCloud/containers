@@ -51,6 +51,7 @@ type Root struct {
 	Readonly bool   `json:"readonly"`
 }
 type Linux struct {
+	Resources   *Resources        `json:"resources,omitempty"`
 	Namespaces  []Namespace       `json:"namespaces"`
 	UIDMappings []IDMap           `json:"uidMappings"`
 	GIDMappings []IDMap           `json:"gidMappings"`
@@ -259,6 +260,9 @@ func validateSpec(s *Spec, root *os.Root) error {
 	}
 	if !validMaps(s.Linux.UIDMappings) || !validMaps(s.Linux.GIDMappings) {
 		return errors.New("nonzero rootless UID/GID mappings are required")
+	}
+	if err := validateResources(s.Linux.Resources); err != nil {
+		return err
 	}
 	if len(s.Linux.Devices) != 0 {
 		return errors.New("custom devices are prohibited")
