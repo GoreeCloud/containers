@@ -233,15 +233,6 @@ func (e *Engine) State(ctx context.Context, id string) ([]byte, error) {
 	// Status reads use the same cooperative lock as state mutations.
 	// An unresolved command must never be reported as a healthy state.
 	err := e.mutate(ctx, id, func() error {
-		if e.lockMutations {
-			marker, err := ReadPendingMutation(ctx, e.StateRoot, id)
-			if err != nil {
-				return fmt.Errorf("OCI journal inspection failed: %w", err)
-			}
-			if marker.Pending || marker.RecoveryRequired {
-				return ErrUnresolvedMutation
-			}
-		}
 		state, err := e.readState(ctx, id)
 		if err != nil {
 			return err
@@ -379,11 +370,26 @@ func TrustedRuntimeBinary(path string) error {
 // mutations, including the read-state/validate/execute sequence. Mock runner
 // tests bypass the production lock path; lock behavior has dedicated tests.
 func (e *Engine) mutate(ctx context.Context, id string, operation func() error) error {
+	if ctx == nil || operation == nil {
+		return errors.New("context and operation required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := ValidateID(id); err != nil {
 		return err
 	}
 	if e.lockMutations {
-		return WithContainerLock(ctx, e.StateRoot, id, operation)
+		return WithContainerLock(ctx, e.StateRoot, id, func() error {
+			marker, err := ReadPendingMutation(ctx, e.StateRoot, id)
+			if err != nil {
+				return fmt.Errorf("OCI journal inspection failed: %w", err)
+			}
+			if marker.Pending || marker.RecoveryRequired {
+				return ErrUnresolvedMutation
+			}
+			return operation()
+		})
 	}
 	return operation()
 }
