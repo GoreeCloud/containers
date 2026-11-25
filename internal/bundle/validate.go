@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/GoreeCloud/containers/internal/jsonkey"
+	"github.com/GoreeCloud/containers/internal/regularinput"
 	"io"
 	"os"
 	"path/filepath"
@@ -170,7 +171,7 @@ func Load(dir string) (*Spec, error) {
 	if !info.Mode().IsRegular() || info.Size() > MaxConfigBytes {
 		return nil, errors.New("OCI config must be a regular bounded file, not a symlink")
 	}
-	f, err := root.Open("config.json")
+	f, err := regularinput.Open(root, "config.json", info)
 	if err != nil {
 		return nil, fmt.Errorf("OCI config: %w", err)
 	}
