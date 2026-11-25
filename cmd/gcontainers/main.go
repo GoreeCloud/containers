@@ -74,6 +74,8 @@ func run(args []string, out io.Writer) error {
 		return recoveryObserve(args[1:], out)
 	case "oci":
 		return oci(args[1:], out)
+	case "volume":
+		return volumeCommand(args[1:], out)
 	case "image":
 		return imageCommand(args[1:], out)
 	case "host":
