@@ -55,6 +55,8 @@ func run(args []string, out io.Writer) error {
 			return errors.New("doctor takes no arguments")
 		}
 		return doctor(out)
+	case "snapshot":
+		return bundleSnapshot(args[1:], out)
 	case "preflight":
 		return bundlePreflight(args[1:], out)
 	case "validate":
