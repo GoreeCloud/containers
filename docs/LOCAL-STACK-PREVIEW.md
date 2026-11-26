@@ -61,3 +61,13 @@ November 26, 2026: actual pinned config mismatch, retained reservation, incorrec
 ```sh
 bash scripts/stack-exercise-smoke.sh --execute --prelaunch-failure
 ```
+
+### Stateful database backup acceptance (host-side, not attachment)
+
+The private quiesced volume backup/restore CLI was exercised with an actual SQLite 3.45.1 database via the installed Python standard library on the authorized laptop. A synthetic 100-row database and ten committed transactions, foreign keys, an explicitly rolled-back transaction, WAL checkpoint and close preceded backup. Pinned verification, fresh restore, byte equality, SQLite integrity/foreign-key checks, exact row totals, and independent writable restored-database reopen passed. The original source and retained backup remained unchanged. No guest mount or live database snapshot is claimed: the fixture deliberately quiesces the application and checks semantic state independently, while the generic backup report retains applicationConsistent=false and mountVerified=false.
+
+```sh
+bash scripts/sqlite-volume-smoke.sh
+```
+
+This advances stateful data recovery acceptance, but does not qualify an application running in a container with durable attached storage, live WAL backups, production database operations, or a general application-aware backup guarantee.
