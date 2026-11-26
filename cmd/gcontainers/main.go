@@ -227,6 +227,7 @@ Usage:
   gcontainers image prepare-bundle EXISTING_STORE MANIFEST_SHA SIZE CONFIG_FILE CONFIG_SHA ENTRYPOINT_SHA PRIVATE_PARENT --experimental
   gcontainers image assemble-manifest EXISTING_STORE SHA256 SIZE PRIVATE_PARENT [--whiteouts] --experimental
   gcontainers image assemble PRIVATE_PARENT (ABS_FILE tar|tar+gzip SHA256 SIZE){1,8} --experimental
+  gcontainers volume verify-backup BACKUP_DIR SHA256
   gcontainers volume backup PRIVATE_STORE ID PRIVATE_BACKUP_PARENT --experimental
   gcontainers volume restore PRIVATE_STORE NEW_ID BACKUP_DIR SHA256 --experimental
   gcontainers volume create PRIVATE_STORE ID --experimental
