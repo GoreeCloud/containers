@@ -75,3 +75,12 @@ bash scripts/sqlite-volume-smoke.sh
 ```
 
 This advances stateful data recovery acceptance, but does not qualify an application running in a container with durable attached storage, live WAL backups, production database operations, or a general application-aware backup guarantee.
+
+### Explicit startup finalization after complete receipt
+
+```sh
+gcontainers stack review-start SESSION RECEIPT_SHA
+gcontainers stack finalize-start SESSION RECEIPT_SHA --experimental
+```
+
+This narrow path requires the independently retained complete receipt pin and exact startup event prefix through all-running-observed, matching launch intent and prelaunch directory identities, active session and shared mapping reservations, and all original running process bindings without pending operations. Review does not modify the evidence. Explicit finalization appends and synchronizes only the missing final startup event, verifies its exact contents, then rechecks bindings. It does not start or restart guests, release leases, clear journals, or authorize deployment. Complete logs refuse replay. If evidence changes or append/readback fails, preserve the session; the final event may already exist. Recheck status instead of truncating or replaying. This is not general interrupted-start recovery: missing independently retained receipt pins, earlier partial launch, stopped guests, reboot, unresolved journals, power loss, and foreign or same-UID races remain outside the accepted scope. The isolated fixture simulates the missing final event, not an actual process crash.

@@ -108,6 +108,19 @@ PYLOCAL
  cat "$workspace/events.saved" > "$session/events.ndjson"
  "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"]'
  echo PERSISTENT_START_LOG_REJECTION_PASS
+ # Simulate the narrow crash window with the independently retained receipt.
+ head -n -1 "$workspace/events.saved" > "$session/events.ndjson"
+ cp "$session/events.ndjson" "$workspace/start.prefix"
+ if "$gc" stack status-local "$session" "$receipt";then exit 1;fi
+ if "$gc" stack review-start "$session" "$(printf '%064d' 0)";then exit 1;fi
+ "$gc" stack review-start "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["readOnly"] and r["startFinalizationChecksPassed"] and not r["startFinalized"] and r["recoveryReviewRequired"] and r["running"]==3'
+ cmp "$session/events.ndjson" "$workspace/start.prefix"
+ if "$gc" stack finalize-start "$session" "$receipt";then exit 1;fi
+ "$gc" stack finalize-start "$session" "$receipt" --experimental | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["startFinalized"] and not r["recoveryReviewRequired"] and r["running"]==3 and not r["deploymentAuthorized"]'
+ cmp "$session/events.ndjson" "$workspace/events.saved"
+ if "$gc" stack finalize-start "$session" "$receipt" --experimental;then exit 1;fi
+ "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"]'
+ echo PERSISTENT_START_FINALIZATION_PASS
  # Fixture-only interruption simulation: persist exact stop intent, then
  # complete the first reverse wave through the existing isolated OCI CLI.
  # No pending marker is removed and no host or unrelated workload is used.

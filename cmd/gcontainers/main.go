@@ -119,7 +119,7 @@ func run(args []string, out io.Writer) error {
 		_, err = fmt.Fprintln(out, string(payload))
 		return err
 	case "stack":
-		if len(args) > 1 && (args[1] == "start-local" || args[1] == "status-local" || args[1] == "stop-local" || args[1] == "resume-stop" || args[1] == "review-stop" || args[1] == "review-prelaunch" || args[1] == "cancel-prelaunch") {
+		if len(args) > 1 && (args[1] == "start-local" || args[1] == "status-local" || args[1] == "stop-local" || args[1] == "resume-stop" || args[1] == "review-stop" || args[1] == "review-start" || args[1] == "finalize-start" || args[1] == "review-prelaunch" || args[1] == "cancel-prelaunch") {
 			return localSession(args[1], args[2:], out)
 		}
 		if len(args) > 1 && args[1] == "audit-session" {
@@ -287,6 +287,8 @@ Usage:
   gcontainers stack review-prelaunch SESSION PRELAUNCH_SHA
   gcontainers stack cancel-prelaunch SESSION PRELAUNCH_SHA --experimental
   gcontainers stack start-local SPEC ADMISSION ADMISSION_SHA EXISTING_STORE PRIVATE_PARENT PRIVATE_LEASE_STORE --experimental
+  gcontainers stack review-start SESSION RECEIPT_SHA
+  gcontainers stack finalize-start SESSION RECEIPT_SHA --experimental
   gcontainers stack status-local SESSION RECEIPT_SHA
   gcontainers stack stop-local SESSION RECEIPT_SHA --experimental
   gcontainers stack review-stop SESSION RECEIPT_SHA
