@@ -219,6 +219,11 @@ func (e *Engine) callWithResources(ctx context.Context, resources *bundle.Resour
 					return nil, errors.New("post-start running state not verified")
 				}
 			}
+			if op == "kill" {
+				if err := e.waitStopped(ctx, id, 3*time.Second); err != nil {
+					return nil, err
+				}
+			}
 			return result, nil
 		})
 	}
