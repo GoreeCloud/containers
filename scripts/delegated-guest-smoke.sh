@@ -73,6 +73,8 @@ assert all(int(status[k],16)==0 for k in ("CapInh","CapPrm","CapEff","CapBnd","C
 assert status["NSpid"].split()[-1]=="1"
 print("DELEGATED_GUEST_IDENTITY_PASS")
 PY
+ "$gc" delegated-observe runc "$id" "$snapshot" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert all(r[k] for k in ("runningObserved","subordinateIdentityObserved","pidNamespaceObserved","zeroCapabilitiesObserved","noNewPrivilegesObserved","seccompFilterObserved","resourceLimitsObserved")) and not r["bundleIdentityVerified"] and not r["deploymentAuthorized"]'
+echo LIVE_DELEGATED_EVIDENCE_PASS
 "$gc" oci stop --runtime runc --id "$id" --experimental
 "$gc" oci delete --runtime runc --id "$id" --experimental
 "$gc" oci pending-summary | python3 -c 'import json,sys;assert json.load(sys.stdin)["pendingCount"]==0'
