@@ -53,6 +53,21 @@ func TestPrivateSocket(t *testing.T) {
 			t.Fatalf("%s: %d", tc.path, r.StatusCode)
 		}
 	}
+	for _, endpoint := range []string{"health", "journal"} {
+		if data, status, e := Query(ctx, sock, endpoint); e != nil || status != 200 || len(data) == 0 {
+			t.Fatal(status, e)
+		}
+	}
+	if _, _, e := Query(ctx, sock, "../health"); e == nil {
+		t.Fatal("invalid endpoint accepted")
+	}
+	alias := filepath.Join(base, "alias.sock")
+	if e := os.Symlink(sock, alias); e != nil {
+		t.Fatal(e)
+	}
+	if _, _, e := Query(ctx, alias, "health"); e == nil {
+		t.Fatal("symlink socket accepted")
+	}
 	cancel()
 	select {
 	case e := <-done:
