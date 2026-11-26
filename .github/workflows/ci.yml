@@ -35,6 +35,8 @@ jobs:
         run: bash scripts/oci-smoke.sh --prepare-only
       - name: End-to-end inert OCI content-store assembly
         run: bash scripts/store-assembly-smoke.sh
+      - name: Verify private volume backup and restore CLI
+        run: bash scripts/volume-backup-smoke.sh
       - name: Vet
         run: go vet ./...
       - name: Build
