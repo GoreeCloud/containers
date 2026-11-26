@@ -147,6 +147,18 @@ func (l *localLease) reserve(session string) error {
 	}
 	return l.checkActive(session)
 }
+
+// samePrivateRecord detects replacement and same-content rewrites with restored
+// mtime using Linux ctime. This is a cooperative observation, not atomicity.
+func samePrivateRecord(a, b os.FileInfo) bool {
+	if !privateRecord(a, 0600) || !privateRecord(b, 0600) || !os.SameFile(a, b) || a.Size() != b.Size() || !a.ModTime().Equal(b.ModTime()) {
+		return false
+	}
+	x, ok := a.Sys().(*syscall.Stat_t)
+	y, ok2 := b.Sys().(*syscall.Stat_t)
+	return ok && ok2 && x.Ctim == y.Ctim
+}
+
 func readPrivateRecord(r *os.Root, name string, max int64) ([]byte, os.FileInfo, error) {
 	i, e := r.Lstat(name)
 	if e != nil || !privateRecord(i, 0600) || i.Size() <= 0 || i.Size() > max {
@@ -161,8 +173,13 @@ func readPrivateRecord(r *os.Root, name string, max int64) ([]byte, os.FileInfo,
 	if e != nil || int64(len(b)) != i.Size() {
 		return nil, nil, errors.New("session record changed")
 	}
-	if e = verifyStackInputIdentity(r, f, i, name); e != nil {
-		return nil, nil, e
+	opened, e := f.Stat()
+	if e != nil || !samePrivateRecord(i, opened) {
+		return nil, nil, errors.New("private session record changed during read")
+	}
+	current, e := r.Lstat(name)
+	if e != nil || !samePrivateRecord(i, current) {
+		return nil, nil, errors.New("private session record pathname changed")
 	}
 	return b, i, nil
 }
@@ -391,7 +408,7 @@ func manageLocal(ctx context.Context, dir, pin, binary string, action localSessi
 	if e = check(); e != nil {
 		return r, e
 	}
-	raw, _, e := readPrivateRecord(root, "local-receipt.json", 64<<10)
+	raw, receiptIdentity, e := readPrivateRecord(root, "local-receipt.json", 64<<10)
 	if e != nil {
 		return r, e
 	}
@@ -410,8 +427,10 @@ func manageLocal(ctx context.Context, dir, pin, binary string, action localSessi
 	r.ReceiptSHA256 = pin
 	r.Expected = len(rec.Bindings)
 	r.RecoveryReviewRequired = true
+	var intentIdentity os.FileInfo
 	if resume {
-		raw, _, err := readPrivateRecord(root, "stop-intent", 128)
+		raw, info, err := readPrivateRecord(root, "stop-intent", 128)
+		intentIdentity = info
 		if err != nil || string(raw) != pin+"\n" {
 			return r, errors.New("exact prior stop intent required")
 		}
@@ -430,7 +449,7 @@ func manageLocal(ctx context.Context, dir, pin, binary string, action localSessi
 	}
 	checkLog := func() error {
 		current, currentIdentity, err := readPrivateRecord(root, "events.ndjson", 64<<10)
-		if err != nil || !os.SameFile(logIdentity, currentIdentity) || !bytes.Equal(log, current) {
+		if err != nil || !samePrivateRecord(logIdentity, currentIdentity) || !bytes.Equal(log, current) {
 			return errors.New("persistent start evidence changed during operation")
 		}
 		return nil
@@ -518,14 +537,26 @@ func manageLocal(ctx context.Context, dir, pin, binary string, action localSessi
 		return r, e
 	}
 	// Re-read the exact receipt and prior stop intent after inventory observations.
-	confirmed, _, e := readPrivateRecord(root, "local-receipt.json", 64<<10)
-	if e != nil || !bytes.Equal(raw, confirmed) {
-		return r, errors.New("local receipt changed during review")
+	checkReceipt := func() error {
+		confirmed, info, err := readPrivateRecord(root, "local-receipt.json", 64<<10)
+		if err != nil || !samePrivateRecord(receiptIdentity, info) || !bytes.Equal(raw, confirmed) {
+			return errors.New("local receipt changed during review")
+		}
+		return nil
+	}
+	checkIntent := func() error {
+		intent, info, err := readPrivateRecord(root, "stop-intent", 128)
+		if err != nil || !samePrivateRecord(intentIdentity, info) || string(intent) != pin+"\n" {
+			return errors.New("stop intent changed")
+		}
+		return nil
+	}
+	if e = checkReceipt(); e != nil {
+		return r, e
 	}
 	if resume {
-		intent, _, e := readPrivateRecord(root, "stop-intent", 128)
-		if e != nil || string(intent) != pin+"\n" {
-			return r, errors.New("stop intent changed")
+		if e = checkIntent(); e != nil {
+			return r, e
 		}
 	}
 	if e = checkLog(); e != nil {
@@ -558,9 +589,8 @@ func manageLocal(ctx context.Context, dir, pin, binary string, action localSessi
 		if e = checkFinalization(); e != nil {
 			return r, e
 		}
-		confirmed, _, e := readPrivateRecord(root, "local-receipt.json", 64<<10)
-		if e != nil || !bytes.Equal(raw, confirmed) {
-			return r, errors.New("receipt changed after finalization; preserve session")
+		if e = checkReceipt(); e != nil {
+			return r, e
 		}
 		observed, e := rt.Inventory(ctx)
 		if e != nil || !reflect.DeepEqual(before, observed) {
@@ -599,16 +629,30 @@ func manageLocal(ctx context.Context, dir, pin, binary string, action localSessi
 		if e = syncDirectory(root); e != nil {
 			return r, e
 		}
+		intent, info, err := readPrivateRecord(root, "stop-intent", 128)
+		if err != nil || string(intent) != pin+"\n" {
+			return r, errors.New("new stop intent not verified")
+		}
+		intentIdentity = info
 	}
 
+	checkStopEvidence := func() error {
+		if e := check(); e != nil {
+			return e
+		}
+		if e := checkMapping(mapping, rec.Mapping, dir); e != nil {
+			return e
+		}
+		if e := checkReceipt(); e != nil {
+			return e
+		}
+		if e := checkIntent(); e != nil {
+			return e
+		}
+		return checkLog()
+	}
 	for _, wave := range rec.StopWaves {
-		if e = checkMapping(mapping, rec.Mapping, dir); e != nil {
-			return r, e
-		}
-		if e = check(); e != nil {
-			return r, e
-		}
-		if e = checkLog(); e != nil {
+		if e = checkStopEvidence(); e != nil {
 			return r, e
 		}
 		remaining := []string{}
@@ -622,6 +666,9 @@ func manageLocal(ctx context.Context, dir, pin, binary string, action localSessi
 		}
 		if e = parallelInstances(ctx, remaining, func(c context.Context, id string) error { return rt.StopBound(c, rec.Bindings[id]) }); e != nil {
 			return r, errors.New("bound stop wave incomplete; preserve session")
+		}
+		if e = checkStopEvidence(); e != nil {
+			return r, e
 		}
 		if e = parallelInstances(ctx, remaining, func(c context.Context, id string) error { return rt.DeleteBound(c, rec.Bindings[id]) }); e != nil {
 			return r, errors.New("bound deletion wave incomplete; preserve session")
@@ -637,6 +684,9 @@ func manageLocal(ctx context.Context, dir, pin, binary string, action localSessi
 		}
 	}
 	if e = check(); e != nil {
+		return r, e
+	}
+	if e = checkStopEvidence(); e != nil {
 		return r, e
 	}
 	f, e = root.OpenFile("cleanup-verified", os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
