@@ -119,7 +119,7 @@ func run(args []string, out io.Writer) error {
 		_, err = fmt.Fprintln(out, string(payload))
 		return err
 	case "stack":
-		if len(args) > 1 && (args[1] == "start-local" || args[1] == "status-local" || args[1] == "stop-local") {
+		if len(args) > 1 && (args[1] == "start-local" || args[1] == "status-local" || args[1] == "stop-local" || args[1] == "resume-stop") {
 			return localSession(args[1], args[2:], out)
 		}
 		if len(args) > 1 && args[1] == "review-exercise" {
@@ -279,9 +279,10 @@ Usage:
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
   gcontainers host helpers
   gcontainers host inspect
-  gcontainers stack start-local SPEC ADMISSION ADMISSION_SHA EXISTING_STORE PRIVATE_PARENT --experimental
+  gcontainers stack start-local SPEC ADMISSION ADMISSION_SHA EXISTING_STORE PRIVATE_PARENT PRIVATE_LEASE_STORE --experimental
   gcontainers stack status-local SESSION RECEIPT_SHA
   gcontainers stack stop-local SESSION RECEIPT_SHA --experimental
+  gcontainers stack resume-stop SESSION RECEIPT_SHA --experimental
   gcontainers stack review-exercise SPEC ADMISSION ADMISSION_SHA
   gcontainers stack exercise SPEC ADMISSION ADMISSION_SHA EXISTING_STORE PRIVATE_PARENT --experimental
   gcontainers stack observe SPEC runc|crun --expected-plan-sha256 DIGEST

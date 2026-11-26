@@ -20,6 +20,8 @@ type InstanceBinding struct {
 	Bundle         string `json:"bundle"`
 	MetadataDevice uint64 `json:"metadataDevice"`
 	MetadataInode  uint64 `json:"metadataInode"`
+	ProcessPID     int64  `json:"processPID"`
+	BootSHA256     string `json:"bootSHA256"`
 	ProcessSHA256  string `json:"processSHA256"`
 }
 
@@ -72,17 +74,19 @@ func (e *Engine) boundState(ctx context.Context, id, dir string) (RuntimeState, 
 	if !ok {
 		return empty, b, errors.New("metadata identity unavailable")
 	}
-	b = InstanceBinding{ID: id, Bundle: dir, MetadataDevice: uint64(st.Dev), MetadataInode: st.Ino}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil || len(boot) == 0 || len(boot) > 128 {
+		return empty, b, errors.New("boot identity unavailable")
+	}
+	bootPin := fmt.Sprintf("sha256:%x", sha256.Sum256(boot))
+	b = InstanceBinding{ID: id, Bundle: dir, MetadataDevice: uint64(st.Dev), MetadataInode: st.Ino, BootSHA256: bootPin}
 	if s.Status == "running" {
 		proc, err := os.OpenRoot("/proc/" + strconv.FormatInt(s.PID, 10))
 		if err != nil {
 			return empty, InstanceBinding{}, err
 		}
 		defer proc.Close()
-		boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
-		if err != nil || len(boot) > 128 {
-			return empty, InstanceBinding{}, errors.New("boot identity unavailable")
-		}
+
 		first, err := boundedKernelRead(proc, "stat")
 		if err != nil {
 			return empty, InstanceBinding{}, err
@@ -103,6 +107,7 @@ func (e *Engine) boundState(ctx context.Context, id, dir string) (RuntimeState, 
 		if err != nil || gen != gen2 {
 			return empty, InstanceBinding{}, errors.New("process generation changed")
 		}
+		b.ProcessPID = s.PID
 		b.ProcessSHA256 = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte("goreecloud-process-v1\x00"+strings.TrimSpace(string(boot))+"\x00"+strconv.FormatInt(s.PID, 10)+"\x00"+gen)))
 	} else if s.Status != "stopped" || s.PID != 0 {
 		return empty, InstanceBinding{}, errors.New("binding requires running or stopped state")
@@ -132,7 +137,7 @@ func (e *Engine) CaptureBinding(ctx context.Context, id, dir string) (InstanceBi
 	return b, nil
 }
 func sameBinding(want, got InstanceBinding, state string) bool {
-	return want.ID == got.ID && want.Bundle == got.Bundle && want.MetadataDevice == got.MetadataDevice && want.MetadataInode == got.MetadataInode && want.MetadataInode != 0 && strings.HasPrefix(want.ProcessSHA256, "sha256:") && len(want.ProcessSHA256) == 71 && (state == "stopped" && got.ProcessSHA256 == "" || state == "running" && want.ProcessSHA256 == got.ProcessSHA256)
+	return want.ID == got.ID && want.Bundle == got.Bundle && want.MetadataDevice == got.MetadataDevice && want.MetadataInode == got.MetadataInode && want.MetadataInode != 0 && want.ProcessPID > 0 && want.BootSHA256 == got.BootSHA256 && len(want.BootSHA256) == 71 && strings.HasPrefix(want.ProcessSHA256, "sha256:") && len(want.ProcessSHA256) == 71 && (state == "stopped" && got.ProcessSHA256 == "" || state == "running" && want.ProcessPID == got.ProcessPID && want.ProcessSHA256 == got.ProcessSHA256)
 }
 func (e *Engine) CheckBinding(ctx context.Context, want InstanceBinding) (string, error) {
 	var status string
@@ -182,5 +187,66 @@ func (e *Engine) DeleteBound(ctx context.Context, want InstanceBinding) error {
 		}
 		_, err = e.call(ctx, "delete", want.ID)
 		return err
+	})
+}
+
+// CheckAbsentBinding is only used in explicit interrupted-stop recovery of
+// the restricted no-process-creation profile. A runtime state error alone
+// is never evidence of process absence.
+func (e *Engine) CheckAbsentBinding(ctx context.Context, want InstanceBinding) error {
+	return e.mutate(ctx, want.ID, func() error {
+		if want.ProcessPID <= 0 || len(want.ProcessSHA256) != 71 || len(want.BootSHA256) != 71 {
+			return errors.New("original process binding required")
+		}
+		root, err := os.OpenRoot(e.StateRoot)
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		before, err := root.Stat(".")
+		if err != nil || privateStateInfo(before) != nil {
+			return errors.New("private runtime root unavailable")
+		}
+		absent := func() error {
+			if _, err := root.Lstat(want.ID); !os.IsNotExist(err) {
+				return errors.New("runtime metadata not absent")
+			}
+			boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+			if err != nil || fmt.Sprintf("sha256:%x", sha256.Sum256(boot)) != want.BootSHA256 {
+				return errors.New("original boot identity changed")
+			}
+			proc, err := os.OpenRoot("/proc/" + strconv.FormatInt(want.ProcessPID, 10))
+			if os.IsNotExist(err) {
+				return nil
+			}
+			if err != nil {
+				return errors.New("original process observation unavailable")
+			}
+			defer proc.Close()
+			raw, err := boundedKernelRead(proc, "stat")
+			if err != nil {
+				return errors.New("original process state unavailable")
+			}
+			gen, err := procGeneration(raw, want.ProcessPID)
+			if err != nil {
+				return err
+			}
+			got := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte("goreecloud-process-v1\x00"+strings.TrimSpace(string(boot))+"\x00"+strconv.FormatInt(want.ProcessPID, 10)+"\x00"+gen)))
+			if got == want.ProcessSHA256 {
+				return errors.New("original process generation still present")
+			}
+			return nil
+		}
+		if err = absent(); err != nil {
+			return err
+		}
+		if err = absent(); err != nil {
+			return err
+		}
+		after, err := os.Lstat(e.StateRoot)
+		if err != nil || !os.SameFile(before, after) {
+			return errors.New("runtime root identity changed")
+		}
+		return ctx.Err()
 	})
 }

@@ -14,7 +14,7 @@ func TestProcessGenerationAndBinding(t *testing.T) {
 	if _, e = procGeneration(raw, 124); e == nil {
 		t.Fatal("wrong PID accepted")
 	}
-	a := InstanceBinding{"worker", "/private/bundle", 1, 2, "sha256:" + strings.Repeat("a", 64)}
+	a := InstanceBinding{ID: "worker", Bundle: "/private/bundle", MetadataDevice: 1, MetadataInode: 2, ProcessPID: 123, BootSHA256: "sha256:" + strings.Repeat("c", 64), ProcessSHA256: "sha256:" + strings.Repeat("a", 64)}
 	if !sameBinding(a, a, "running") {
 		t.Fatal("matching generation rejected")
 	}

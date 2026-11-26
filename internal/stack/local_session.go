@@ -191,6 +191,7 @@ type localReceipt struct {
 	Session         string                            `json:"session"`
 	PlanSHA256      string                            `json:"planSHA256"`
 	AdmissionSHA256 string                            `json:"admissionSHA256"`
+	Mapping         mappingReference                  `json:"mapping"`
 	StopWaves       [][]string                        `json:"stopWaves"`
 	Bindings        map[string]engine.InstanceBinding `json:"bindings"`
 }
@@ -232,7 +233,7 @@ func parseLocalReceipt(raw []byte, pin, session, dir string) (localReceipt, erro
 	if e := d.Decode(new(any)); e != io.EOF {
 		return r, errors.New("trailing local receipt")
 	}
-	if r.Version != 1 || r.Session != session || !localSessionName.MatchString(session) || !imagePattern.MatchString(r.PlanSHA256) || !imagePattern.MatchString(r.AdmissionSHA256) || len(r.Bindings) < 1 || len(r.Bindings) > 4 || len(r.StopWaves) < 1 || len(r.StopWaves) > 4 {
+	if r.Version != 1 || !validMappingReference(r.Mapping) || r.Session != session || !localSessionName.MatchString(session) || !imagePattern.MatchString(r.PlanSHA256) || !imagePattern.MatchString(r.AdmissionSHA256) || len(r.Bindings) < 1 || len(r.Bindings) > 4 || len(r.StopWaves) < 1 || len(r.StopWaves) > 4 {
 		return r, errors.New("invalid local receipt")
 	}
 	seen := map[string]bool{}
@@ -243,7 +244,7 @@ func parseLocalReceipt(raw []byte, pin, session, dir string) (localReceipt, erro
 		}
 		for _, id := range w {
 			b, ok := r.Bindings[id]
-			if !ok || seen[id] || engine.ValidateID(id) != nil || !localRuntimeName.MatchString(b.ID) || runtimeIDs[b.ID] || !imagePattern.MatchString(b.ProcessSHA256) || b.MetadataInode == 0 || filepath.Dir(b.Bundle) != filepath.Join(dir, "bundles") || filepath.Clean(b.Bundle) != b.Bundle {
+			if !ok || seen[id] || engine.ValidateID(id) != nil || !localRuntimeName.MatchString(b.ID) || runtimeIDs[b.ID] || !imagePattern.MatchString(b.ProcessSHA256) || !imagePattern.MatchString(b.BootSHA256) || b.ProcessPID <= 0 || b.MetadataInode == 0 || filepath.Dir(b.Bundle) != filepath.Join(dir, "bundles") || filepath.Clean(b.Bundle) != b.Bundle {
 				return r, errors.New("invalid bound instance receipt")
 			}
 			seen[id] = true
@@ -263,19 +264,27 @@ type LocalSessionReport struct {
 	Stopped                int    `json:"stopped"`
 	Pending                bool   `json:"pending"`
 	BindingsObserved       bool   `json:"bindingsObserved"`
+	MissingProcessAbsent   int    `json:"missingProcessAbsent"`
 	CleanupVerified        bool   `json:"cleanupVerified"`
 	RecoveryReviewRequired bool   `json:"recoveryReviewRequired"`
 	HealthVerified         bool   `json:"healthVerified"`
 	DeploymentAuthorized   bool   `json:"deploymentAuthorized"`
 }
 
-func StartLocal(ctx context.Context, s Spec, admission, pin, store, parent, binary string) (ExerciseReport, error) {
-	return runExercise(ctx, s, admission, pin, store, parent, binary, true)
+func StartLocal(ctx context.Context, s Spec, admission, pin, store, parent, binary, mappingStore string) (ExerciseReport, error) {
+	return runExercise(ctx, s, admission, pin, store, parent, binary, true, mappingStore)
 }
 
 // Inspect or stop only the exact receipt selected by the caller. No automatic
 // replay after an interrupted stop, no action on unmatched or pending IDs.
 func ManageLocal(ctx context.Context, dir, pin, binary string, stop bool) (LocalSessionReport, error) {
+	return manageLocal(ctx, dir, pin, binary, stop, false)
+}
+func ResumeLocalStop(ctx context.Context, dir, pin, binary string) (LocalSessionReport, error) {
+	return manageLocal(ctx, dir, pin, binary, true, true)
+}
+func manageLocal(ctx context.Context, dir, pin, binary string, stop, resume bool) (LocalSessionReport, error) {
+
 	var r LocalSessionReport
 	if ctx == nil || os.Geteuid() == 0 || filepath.Base(binary) != "runc" || !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
 		return r, errors.New("private local session required")
@@ -326,11 +335,27 @@ func ManageLocal(ctx context.Context, dir, pin, binary string, stop bool) (Local
 	if e != nil {
 		return r, e
 	}
+	mapping, e := acquireMappingStore(ctx, rec.Mapping.Store, filepath.Dir(dir))
+	if e != nil {
+		return r, e
+	}
+	defer mapping.close()
+	if e = checkMapping(mapping, rec.Mapping, dir); e != nil {
+		return r, e
+	}
 	r.ReceiptSHA256 = pin
 	r.Expected = len(rec.Bindings)
 	r.RecoveryReviewRequired = true
-	if _, e = root.Lstat("stop-intent"); !os.IsNotExist(e) {
+	if resume {
+		raw, _, err := readPrivateRecord(root, "stop-intent", 128)
+		if err != nil || string(raw) != pin+"\n" {
+			return r, errors.New("exact prior stop intent required")
+		}
+	} else if _, e = root.Lstat("stop-intent"); !os.IsNotExist(e) {
 		return r, errors.New("previous stop intent exists; recovery review required")
+	}
+	if _, e = root.Lstat("cleanup-verified"); !os.IsNotExist(e) {
+		return r, errors.New("cleanup record already exists; manual reservation review required")
 	}
 	log, _, e := readPrivateRecord(root, "events.ndjson", 64<<10)
 	if e != nil {
@@ -354,14 +379,16 @@ func ManageLocal(ctx context.Context, dir, pin, binary string, stop bool) (Local
 		return r, e
 	}
 	r.Pending = before.RecoveryRequired
-	if before.RecoveryRequired || len(before.Entries) != len(rec.Bindings) {
+	if before.RecoveryRequired || len(before.Entries) > len(rec.Bindings) || (!resume && len(before.Entries) != len(rec.Bindings)) {
 		return r, errors.New("local inventory uncertain or incomplete")
 	}
 	expected := map[string]engine.InstanceBinding{}
 	for _, b := range rec.Bindings {
 		expected[b.ID] = b
 	}
+	present := map[string]bool{}
 	for _, x := range before.Entries {
+		present[x.ID] = true
 		b, ok := expected[x.ID]
 		if !ok || !x.MetadataPresent || x.PendingOperation != "" {
 			return r, errors.New("unexpected runtime instance")
@@ -378,6 +405,29 @@ func ManageLocal(ctx context.Context, dir, pin, binary string, stop bool) (Local
 			return r, errors.New("unexpected local state")
 		}
 	}
+	if resume {
+		// Missing entries must be from an already reached reverse wave; do not
+		// permit a skipped dependency wave or assume a failed state query is absent.
+		earlierPresent := false
+		for _, wave := range rec.StopWaves {
+			wavePresent := false
+			for _, id := range wave {
+				b := rec.Bindings[id]
+				if present[b.ID] {
+					wavePresent = true
+					continue
+				}
+				if earlierPresent {
+					return r, errors.New("missing instance outside completed reverse waves")
+				}
+				if e = rt.CheckAbsentBinding(ctx, b); e != nil {
+					return r, e
+				}
+				r.MissingProcessAbsent++
+			}
+			earlierPresent = earlierPresent || wavePresent
+		}
+	}
 	after, e := rt.Inventory(ctx)
 	if e != nil || !reflect.DeepEqual(before, after) {
 		return r, errors.New("local inventory changed")
@@ -392,34 +442,55 @@ func ManageLocal(ctx context.Context, dir, pin, binary string, stop bool) (Local
 	}
 	// Durable intent before first signal, never automatically resume on failure.
 	r.RecoveryReviewRequired = true
-	f, e := root.OpenFile("stop-intent", os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
-	if e != nil {
-		return r, e
+	var f *os.File
+	if !resume {
+		f, e = root.OpenFile("stop-intent", os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
+		if e != nil {
+			return r, e
+		}
+		_, e = f.WriteString(pin + "\n")
+		if e == nil {
+			e = f.Sync()
+		}
+		if e = errors.Join(e, f.Close()); e != nil {
+			return r, e
+		}
+		if e = syncDirectory(root); e != nil {
+			return r, e
+		}
 	}
-	_, e = f.WriteString(pin + "\n")
-	if e == nil {
-		e = f.Sync()
-	}
-	if e = errors.Join(e, f.Close()); e != nil {
-		return r, e
-	}
-	if e = syncDirectory(root); e != nil {
-		return r, e
-	}
+
 	for _, wave := range rec.StopWaves {
+		if e = checkMapping(mapping, rec.Mapping, dir); e != nil {
+			return r, e
+		}
 		if e = check(); e != nil {
 			return r, e
 		}
-		if e = parallelInstances(ctx, wave, func(c context.Context, id string) error { return rt.StopBound(c, rec.Bindings[id]) }); e != nil {
+		remaining := []string{}
+		for _, id := range wave {
+			if present[rec.Bindings[id].ID] {
+				remaining = append(remaining, id)
+			}
+		}
+		if len(remaining) == 0 {
+			continue
+		}
+		if e = parallelInstances(ctx, remaining, func(c context.Context, id string) error { return rt.StopBound(c, rec.Bindings[id]) }); e != nil {
 			return r, errors.New("bound stop wave incomplete; preserve session")
 		}
-		if e = parallelInstances(ctx, wave, func(c context.Context, id string) error { return rt.DeleteBound(c, rec.Bindings[id]) }); e != nil {
+		if e = parallelInstances(ctx, remaining, func(c context.Context, id string) error { return rt.DeleteBound(c, rec.Bindings[id]) }); e != nil {
 			return r, errors.New("bound deletion wave incomplete; preserve session")
 		}
 	}
 	inv, e := rt.Inventory(ctx)
 	if e != nil || inv.RecoveryRequired || len(inv.Entries) != 0 {
 		return r, errors.New("local cleanup inventory uncertain")
+	}
+	for _, b := range rec.Bindings {
+		if e = rt.CheckAbsentBinding(ctx, b); e != nil {
+			return r, e
+		}
 	}
 	if e = check(); e != nil {
 		return r, e
@@ -436,6 +507,9 @@ func ManageLocal(ctx context.Context, dir, pin, binary string, stop bool) (Local
 		return r, e
 	}
 	if e = syncDirectory(root); e != nil {
+		return r, e
+	}
+	if e = releaseMappings(mapping, rec.Mapping, dir); e != nil {
 		return r, e
 	}
 	if e = lease.release(session); e != nil {

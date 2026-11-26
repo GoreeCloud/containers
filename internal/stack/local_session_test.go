@@ -73,7 +73,7 @@ func TestLocalReceiptPinsAndPaths(t *testing.T) {
 	d := "/private/stack-exercise-123"
 	id := "gc-" + strings.Repeat("a", 40)
 	pin := "sha256:" + strings.Repeat("b", 64)
-	r := localReceipt{Version: 1, Session: filepath.Base(d), PlanSHA256: pin, AdmissionSHA256: pin, StopWaves: [][]string{{id}}, Bindings: map[string]engine.InstanceBinding{id: {ID: "gc-ex-" + strings.Repeat("c", 40), Bundle: filepath.Join(d, "bundles", "prepared-1"), MetadataDevice: 1, MetadataInode: 2, ProcessSHA256: pin}}}
+	r := localReceipt{Version: 1, Mapping: mappingReference{Store: "/private/leases", Name: "lease-" + strings.Repeat("c", 32) + ".json", SHA256: pin}, Session: filepath.Base(d), PlanSHA256: pin, AdmissionSHA256: pin, StopWaves: [][]string{{id}}, Bindings: map[string]engine.InstanceBinding{id: {ID: "gc-ex-" + strings.Repeat("c", 40), Bundle: filepath.Join(d, "bundles", "prepared-1"), MetadataDevice: 1, MetadataInode: 2, ProcessPID: 123, BootSHA256: pin, ProcessSHA256: pin}}}
 	raw, _ := json.Marshal(r)
 	if _, e := parseLocalReceipt(raw, digestBytes(raw), r.Session, d); e != nil {
 		t.Fatal(e)

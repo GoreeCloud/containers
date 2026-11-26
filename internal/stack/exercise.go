@@ -414,9 +414,9 @@ func checkExerciseBundle(s *bundle.Spec, i Instance) (uint32, uint32, error) {
 // deployment admission. Each run allocates a fresh private runtime root and
 // never targets existing runtime IDs. Prepared bytes and evidence are kept.
 func RunExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, parent, runtimeBinary string) (ExerciseReport, error) {
-	return runExercise(ctx, s, admissionPath, pin, storePath, parent, runtimeBinary, false)
+	return runExercise(ctx, s, admissionPath, pin, storePath, parent, runtimeBinary, false, "")
 }
-func runExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, parent, runtimeBinary string, persistent bool) (ExerciseReport, error) {
+func runExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, parent, runtimeBinary string, persistent bool, mappingStore string) (ExerciseReport, error) {
 
 	var report ExerciseReport
 	if ctx == nil || os.Geteuid() == 0 || filepath.Base(runtimeBinary) != "runc" {
@@ -436,7 +436,8 @@ func runExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 	if e != nil {
 		return report, e
 	}
-	var lease *localLease
+	var lease, mapping *localLease
+	var mappingRef mappingReference
 	if persistent {
 		lease, e = acquireLocalLease(ctx, parent)
 		if e != nil {
@@ -446,6 +447,15 @@ func runExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 		if e = lease.requireVacant(); e != nil {
 			return report, e
 		}
+		mapping, e = acquireMappingStore(ctx, mappingStore, parent)
+		if e != nil {
+			return report, e
+		}
+		defer mapping.close()
+		if _, e = scanMappingRecords(mapping); e != nil {
+			return report, e
+		}
+
 	}
 	dir, e := os.MkdirTemp(parent, "stack-exercise-")
 	if e != nil {
@@ -468,6 +478,11 @@ func runExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 		if persistent {
 			if e := lease.checkActive(filepath.Base(dir)); e != nil {
 				return e
+			}
+			if mappingRef.Name != "" {
+				if e := checkMapping(mapping, mappingRef, dir); e != nil {
+					return e
+				}
 			}
 		}
 		a, e := privateExerciseDir(parent)
@@ -561,6 +576,38 @@ func runExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 			report.Prepared++
 		}
 	}
+	if persistent {
+		mappingRef, e = reserveMappings(mapping, dir, uids, gids)
+		if e != nil {
+			if errors.Is(e, errMappingInUse) {
+				if release := lease.release(filepath.Base(dir)); release != nil {
+					return report, errors.Join(e, release)
+				}
+				report.RecoveryReviewRequired = false
+			}
+			return report, e
+		}
+		// Preserve reservation reference even if the start is interrupted before
+		// the final runtime receipt is available.
+		raw, err := json.Marshal(mappingRef)
+		if err != nil {
+			return report, err
+		}
+		f, err := root.OpenFile("mapping-reservation.json", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			return report, err
+		}
+		_, err = f.Write(raw)
+		if err == nil {
+			err = f.Sync()
+		}
+		if err = errors.Join(err, f.Close()); err != nil {
+			return report, err
+		}
+		if err = syncDirectory(root); err != nil {
+			return report, err
+		}
+	}
 	if e = record(exerciseEvent{Phase: "all-bundles-prepared"}); e != nil {
 		return report, e
 	}
@@ -615,7 +662,7 @@ func runExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 		if e = startWaves(ctx, isolatedRuntime{rt: rt, ids: ids, dirs: dirs}, p, dirs, record, &report); e != nil {
 			return report, e
 		}
-		rec := localReceipt{Version: 1, Session: filepath.Base(dir), PlanSHA256: p.PlanSHA256, AdmissionSHA256: pin, StopWaves: p.StopWaves, Bindings: map[string]engine.InstanceBinding{}}
+		rec := localReceipt{Version: 1, Session: filepath.Base(dir), PlanSHA256: p.PlanSHA256, AdmissionSHA256: pin, StopWaves: p.StopWaves, Mapping: mappingRef, Bindings: map[string]engine.InstanceBinding{}}
 		for _, w := range p.StartWaves {
 			for _, i := range w.Instances {
 				b, err := rt.CaptureBinding(ctx, ids[i.ID], dirs[i.ID])
