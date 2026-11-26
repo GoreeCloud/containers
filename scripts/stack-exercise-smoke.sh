@@ -98,6 +98,9 @@ PYLOCAL
  )
  session="${values[0]}";receipt="${values[1]}"
  "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"] and not r["recoveryReviewRequired"]'
+ "$gc" stack watch-local "$session" "$receipt" 2 1 | python3 -c 'import json,sys;r=[json.loads(l) for l in sys.stdin];assert len(r)==2 and all(s["allRunningObserved"] and s["bindingsObserved"] and not s["healthVerified"] and not s["autoRestart"] for s in r)'
+ if "$gc" stack watch-local "$session" "$receipt" 31 1;then exit 1;fi
+ echo RECEIPT_BOUND_WATCH_PASS
  if [[ "${2:-}" == --interrupted-stop ]];then
  # A final-event-only synthetic log must never authorize status or stop.
  cp -- "$session/events.ndjson" "$workspace/events.saved"
@@ -155,6 +158,9 @@ PYINT
   sleep 1
  done
  [[ "$stopped" == 3 ]]
+ if "$gc" stack watch-local "$session" "$receipt" 1 1 > "$workspace/watch-stopped.json";then exit 1;fi
+ python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["stopped"]==3 and r["reviewRequired"] and not r["allRunningObserved"]' < "$workspace/watch-stopped.json"
+ echo BOUND_WATCH_NATURAL_EXIT_PASS
  "$gc" stack stop-local "$session" "$receipt" --experimental | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["cleanupVerified"] and not r["recoveryReviewRequired"]'
  test ! -e "$workspace/sessions/active-session"
  test -z "$(find "$workspace/leases" -maxdepth 1 -name 'lease-*.json' -print -quit)"

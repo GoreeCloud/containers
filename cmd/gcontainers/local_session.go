@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -24,6 +25,21 @@ func localSession(action string, args []string, out io.Writer) error {
 	defer cancel()
 	var report any
 	switch action {
+	case "watch-local":
+		if len(args) != 4 {
+			return errors.New("usage: stack watch-local SESSION RECEIPT_SHA SAMPLES INTERVAL_SECONDS")
+		}
+		samples, err := strconv.Atoi(args[2])
+		if err != nil {
+			return errors.New("invalid sample count")
+		}
+		seconds, err := strconv.Atoi(args[3])
+		if err != nil || seconds < 1 || seconds > 10 {
+			return errors.New("invalid interval")
+		}
+		watchCtx, stopWatch := context.WithTimeout(context.Background(), 6*time.Minute)
+		defer stopWatch()
+		return stack.WatchLocal(watchCtx, args[0], args[1], bin, samples, time.Duration(seconds)*time.Second, func(s stack.LocalWatchSample) error { return json.NewEncoder(out).Encode(s) })
 	case "start-local":
 		if len(args) != 7 || args[6] != "--experimental" {
 			return errors.New("usage: stack start-local SPEC ADMISSION ADMISSION_SHA EXISTING_STORE PRIVATE_PARENT PRIVATE_LEASE_STORE --experimental")
