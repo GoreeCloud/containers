@@ -102,6 +102,7 @@ PYLOCAL
  # Fixture-only interruption simulation: persist exact stop intent, then
  # complete the first reverse wave through the existing isolated OCI CLI.
  # No pending marker is removed and no host or unrelated workload is used.
+ if "$gc" stack review-stop "$session" "$receipt";then exit 1;fi
  if "$gc" stack resume-stop "$session" "$receipt" --experimental;then exit 1;fi
  printf '%s\n' "$receipt" > "$session/stop-intent"
  id="$(python3 - "$session/local-receipt.json" <<'PYINT'
@@ -113,6 +114,11 @@ PYINT
  XDG_RUNTIME_DIR="$session/runtime" "$gc" oci stop --runtime runc --id "$id" --experimental
  XDG_RUNTIME_DIR="$session/runtime" "$gc" oci delete --runtime runc --id "$id" --experimental
  if "$gc" stack stop-local "$session" "$receipt" --experimental;then exit 1;fi
+ if "$gc" stack review-stop "$session" "sha256:$(printf '%064d' 0)";then exit 1;fi
+ "$gc" stack review-stop "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["readOnly"] and r["stopResumeChecksPassed"] and r["recoveryReviewRequired"] and r["running"]==2 and r["missingProcessAbsent"]==1 and not r["cleanupVerified"] and not r["deploymentAuthorized"]'
+ test -f "$workspace/sessions/active-session"
+ test ! -e "$session/cleanup-verified"
+ echo INTERRUPTED_STOP_READ_ONLY_REVIEW_PASS
  "$gc" stack resume-stop "$session" "$receipt" --experimental | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["missingProcessAbsent"]==1 and r["cleanupVerified"] and not r["recoveryReviewRequired"]'
  test ! -e "$workspace/sessions/active-session"
  test -z "$(find "$workspace/leases" -maxdepth 1 -name 'lease-*.json' -print -quit)"

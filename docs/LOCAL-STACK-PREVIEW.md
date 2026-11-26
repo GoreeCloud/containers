@@ -61,3 +61,7 @@ November 26, 2026: actual pinned config mismatch, retained reservation, incorrec
 ```sh
 bash scripts/stack-exercise-smoke.sh --execute --prelaunch-failure
 ```
+
+### Interrupted-stop review before mutation
+
+Run `gcontainers stack review-stop SESSION RECEIPT_SHA` to evaluate the same pinned receipt, shared reservation, prior stop intent, bound process generations, reverse-wave absence and stable inventory checks used by explicit resume-stop. Success reports stopResumeChecksPassed=true and recoveryReviewRequired=true; it is neither cleanup nor authorization. No signal, deletion, journal clearing or lease release. Cooperating locks may be acquired. Explicit resume repeats all checks; observations are not a guarantee of future state. The actual interrupted-stop fixture verified no-intent and stale-pin refusal, two still-running bound guests, one verified absent original generation and intact reservation, then separate explicit resume and clean shutdown.
