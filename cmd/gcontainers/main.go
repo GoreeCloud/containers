@@ -257,6 +257,7 @@ Usage:
   gcontainers image fetch-blob EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
   gcontainers image pull-stage EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE PRIVATE_PARENT [--bearer-file PRIVATE_TOKEN_FILE] [--whiteouts] --experimental
   gcontainers image prepare-bundle EXISTING_STORE MANIFEST_SHA SIZE CONFIG_FILE CONFIG_SHA ENTRYPOINT_SHA PRIVATE_PARENT [--whiteouts] [--delegated-guest] --experimental
+  gcontainers image export-layout EXISTING_STORE MANIFEST_SHA SIZE PRIVATE_PARENT [--whiteouts] --experimental
   gcontainers image import-layout EXISTING_STORE ABS_LAYOUT INDEX_SHA MANIFEST_SHA SIZE PRIVATE_PARENT [--whiteouts] --experimental
   gcontainers image assemble-manifest EXISTING_STORE SHA256 SIZE PRIVATE_PARENT [--whiteouts] --experimental
   gcontainers image assemble PRIVATE_PARENT (ABS_FILE tar|tar+gzip SHA256 SIZE){1,8} --experimental
@@ -522,6 +523,9 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "export-layout" {
+		return layoutExport(args[1:], out)
+	}
 	if len(args) > 0 && args[0] == "import-layout" {
 		return layoutImport(args[1:], out)
 	}

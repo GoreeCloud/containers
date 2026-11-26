@@ -105,6 +105,42 @@ func TestImportPinnedLayout(t *testing.T) {
 			if e != nil || r.ReusedBlobs != 4 || r.ImportedBlobs != 0 {
 				t.Fatal(r, e)
 			}
+			exportParent := t.TempDir()
+			os.Chmod(exportParent, 0700)
+			if _, e = s.ExportLayout(ctx, md.Digest, md.Size+1, exportParent, false); e == nil {
+				t.Fatal("bad size accepted")
+			}
+			if mode == "whiteout" {
+				failed, e := s.ExportLayout(ctx, md.Digest, md.Size, exportParent, false)
+				if e == nil || failed.DiffIDsVerified || failed.IndexDigest != "" {
+					t.Fatal("default whiteout export accepted")
+				}
+				if _, e = os.Stat(filepath.Join(failed.Directory, "index.json")); !os.IsNotExist(e) {
+					t.Fatal("failed export index published")
+				}
+			}
+			x, e := s.ExportLayout(ctx, md.Digest, md.Size, exportParent, mode == "whiteout")
+			if e != nil || !x.DiffIDsVerified || !x.ArchiveSubsetVerified || x.VerifiedBlobs != 4 || x.SourceProvenanceVerified || x.ExecutionAuthorized {
+				t.Fatal(x, e)
+			}
+			dest := testStore(t)
+			rr, e := dest.ImportLayoutAndStage(ctx, x.Directory, x.IndexDigest, x.ManifestDigest, x.ManifestSize, parent, mode == "whiteout")
+			if e != nil || rr.ImportedBlobs != 4 || !rr.DiffIDsVerified {
+				t.Fatal(rr, e)
+			}
+			data, e := os.ReadFile(filepath.Join(rr.Directory, "etc/new"))
+			if e != nil || string(data) != "new" {
+				t.Fatal(string(data), e)
+			}
+			if mode == "whiteout" {
+				if _, e = os.Stat(filepath.Join(rr.Directory, "etc/old")); !os.IsNotExist(e) {
+					t.Fatal("round-trip whiteout not applied")
+				}
+			}
+			if _, e = s.ExportLayout(ctx, md.Digest, md.Size, s.root, true); e == nil {
+				t.Fatal("export inside store accepted")
+			}
+
 		})
 	}
 }
