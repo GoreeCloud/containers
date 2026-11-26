@@ -13,6 +13,9 @@
 #ifndef GC_GUEST_ID
 #define GC_GUEST_ID 0
 #endif
+#ifndef GC_GUEST_TICKS
+#define GC_GUEST_TICKS 300
+#endif
 
 static volatile sig_atomic_t stop;
 static void on_term(int signal_number) { (void)signal_number; stop = 1; }
@@ -43,7 +46,7 @@ int main(void) {
     action.sa_handler = on_term;
     if (sigaction(SIGTERM, &action, 0) != 0) return 20;
     /* Remain alive only after the checks; self-terminate if the caller dies. */
-    for (int i = 0; i < 300 && !stop; i++) {
+    for (int i = 0; i < GC_GUEST_TICKS && !stop; i++) {
         struct timespec delay = {0, 100000000L};
         nanosleep(&delay, 0);
     }

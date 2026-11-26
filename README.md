@@ -174,3 +174,7 @@ See [delegated guest profile](docs/DELEGATED-GUEST.md). The original create gate
 ### Explicit finite native Stack exercise
 
 See [Stack exercise](docs/STACK-EXERCISE.md) for the restricted, digest-pinned nonproduction controller. It starts concurrent dependency waves in a fresh private runtime, verifies delegated kernel evidence, and stops/deletes in reverse order. It does not provide general Stack apply, MIPS authorization, readiness or crash reconciliation.
+
+### Persistent local Stack preview
+
+The [persistent local Stack preview](docs/LOCAL-STACK-PREVIEW.md) adds explicit start/status/stop with pinned session receipts, process-generation and metadata binding, one active reservation per dedicated parent, cross-parent shared subordinate identity reservations, explicit interrupted-stop recovery, reverse cleanup and fresh generation reuse. Beta qualification remains incomplete.
