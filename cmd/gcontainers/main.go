@@ -229,8 +229,8 @@ Usage:
   gcontainers volume create PRIVATE_STORE ID --experimental
   gcontainers volume inspect PRIVATE_STORE ID
   gcontainers volume count PRIVATE_STORE
-  gcontainers serve-local ABS_SOCKET --experimental
-  gcontainers local-query ABS_SOCKET health|journal
+  gcontainers serve-local ABS_SOCKET [--runtime runc|crun] --experimental
+  gcontainers local-query ABS_SOCKET health|journal|runtime-summary
   gcontainers wait runc|crun ID SECONDS
   gcontainers inventory runc|crun
   gcontainers recovery-observe runc|crun ID

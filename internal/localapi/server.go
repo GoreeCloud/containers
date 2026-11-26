@@ -59,7 +59,8 @@ type limitedConn struct {
 func (c *limitedConn) Close() error { err := c.Conn.Close(); c.once.Do(c.release); return err }
 
 // Handler exposes no mutations, identifiers, host paths or secrets.
-func Handler(stateRoot string) http.Handler {
+func Handler(stateRoot string) http.Handler { return handler(stateRoot, nil) }
+func handler(stateRoot string, runtime *engine.Engine) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
@@ -70,6 +71,23 @@ func Handler(stateRoot string) http.Handler {
 		switch r.URL.Path {
 		case "/v1/health":
 			json.NewEncoder(w).Encode(map[string]any{"apiVersion": "v1", "readOnly": true, "identityIntegrationVerified": false, "deploymentAuthorized": false})
+		case "/v1/runtime-summary":
+			if runtime == nil {
+				http.NotFound(w, r)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			defer cancel()
+			report, err := runtime.Inventory(ctx)
+			if err != nil {
+				http.Error(w, "runtime inventory unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			summary := runtimeSummary{ReadOnly: true, Total: len(report.Entries), Running: report.Running, Created: report.Created, Stopped: report.Stopped, Uncertain: report.Uncertain, RecoveryRequired: report.RecoveryRequired}
+			if summary.RecoveryRequired {
+				w.WriteHeader(http.StatusConflict)
+			}
+			json.NewEncoder(w).Encode(summary)
 		case "/v1/journal":
 			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 			defer cancel()
@@ -91,6 +109,18 @@ func Handler(stateRoot string) http.Handler {
 // Serve creates a fresh Unix socket in a caller-owned private directory.
 // Foreground only; never exposes TCP or replaces an existing socket.
 func Serve(ctx context.Context, socket, stateRoot string) error {
+	return serve(ctx, socket, stateRoot, nil)
+}
+
+// ServeRuntime opts into a bounded redacted runtime census. Same-UID access
+// is not MIPS identity. A runtime not bound to the supplied root is refused.
+func ServeRuntime(ctx context.Context, socket, stateRoot string, runtime *engine.Engine) error {
+	if runtime == nil || runtime.StateRoot != stateRoot {
+		return errors.New("runtime root mismatch")
+	}
+	return serve(ctx, socket, stateRoot, runtime)
+}
+func serve(ctx context.Context, socket, stateRoot string, runtime *engine.Engine) error {
 	if ctx == nil || os.Geteuid() == 0 || !filepath.IsAbs(socket) || filepath.Clean(socket) != socket {
 		return errors.New("nonroot absolute socket required")
 	}
@@ -128,7 +158,7 @@ func Serve(ctx context.Context, socket, stateRoot string) error {
 	if err = os.Chmod(socket, 0600); err != nil {
 		return err
 	}
-	server := &http.Server{Handler: Handler(stateRoot), ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 2 * time.Second, MaxHeaderBytes: 4096}
+	server := &http.Server{Handler: handler(stateRoot, runtime), ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 2 * time.Second, MaxHeaderBytes: 4096}
 	server.SetKeepAlivesEnabled(false)
 	done := make(chan struct{})
 	defer close(done)
