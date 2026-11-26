@@ -41,6 +41,8 @@ jobs:
           bash scripts/prepared-bundle-smoke.sh --prepare-only --whiteouts
       - name: Verify private volume backup and restore CLI
         run: bash scripts/volume-backup-smoke.sh
+      - name: Verify quiesced SQLite database backup and restore
+        run: bash scripts/sqlite-volume-smoke.sh
       - name: Verify explicit offline OCI whiteout assembly
         run: bash scripts/whiteout-smoke.sh
       - name: Verify local multi-platform index selection and assembly
