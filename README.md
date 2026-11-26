@@ -150,3 +150,7 @@ On a disposable Linux x86-64 test environment, run `scripts/oci-smoke.sh --prepa
 ## Licensing
 
 The development branch contains the existing [MIT License](LICENSE) notice. The protected source-admission candidate preserves both existing notices; source-rights verification remains open (issue #13). No third-party runtime source is vendored. OCI specifications and `crun`/`runc` are independent upstream projects with their own licenses.
+
+### Explicit non-root guest preview
+
+See [delegated guest profile](docs/DELEGATED-GUEST.md). The original create gate remains unchanged. The distinct delegated profile supports private snapshot and pinned image preparation, explicit runc create and actual first-party guest UID/GID 1000 lifecycle; no automatic Stack apply, host policy change or Stable authorization.

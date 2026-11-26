@@ -22,6 +22,7 @@ const MaxSnapshotFiles = 4096
 const MaxSnapshotBytes int64 = 256 << 20
 
 type SnapshotReport struct {
+	DelegatedGuest      bool   `json:"delegatedGuest,omitempty"`
 	Directory           string `json:"directory"`
 	ContentSHA256       string `json:"contentSHA256"`
 	Files               int    `json:"files"`
@@ -36,6 +37,17 @@ type SnapshotReport struct {
 // Neither this digest nor a private copy authenticates source or defeats a
 // hostile same-UID actor. Never automatically launch the resulting directory.
 func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport, err error) {
+	return snapshot(ctx, source, parent, false)
+}
+
+// SnapshotDelegated normalizes only a new private copy for a nonroot guest.
+// Outer directory and config stay owner-private; guest-readable payload is
+// reachable only through that private directory until runtime admission.
+func SnapshotDelegated(ctx context.Context, source, parent string) (SnapshotReport, error) {
+	return snapshot(ctx, source, parent, true)
+}
+func snapshot(ctx context.Context, source, parent string, delegated bool) (report SnapshotReport, err error) {
+
 	if ctx == nil || os.Geteuid() == 0 {
 		return report, errors.New("nonroot snapshot context required")
 	}
@@ -57,6 +69,9 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 	sourceBefore, e := os.Lstat(source)
 	if e != nil {
 		return report, e
+	}
+	if delegated && sourceBefore.Mode().Perm() != 0700 {
+		return report, errors.New("delegated source bundle must be private")
 	}
 	src, e := os.OpenRoot(source)
 	if e != nil {
@@ -140,6 +155,9 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 	// Copy the restricted source tree without following links. Validate the
 	// copied config and rootfs before exposing the result.
 	digest := sha256.New()
+	if delegated {
+		digest.Write([]byte("goreecloud-delegated-snapshot-v1\x00"))
+	}
 	entries := 0
 	var walk func(string) error
 	walk = func(rel string) error {
@@ -204,6 +222,12 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 				df.Close()
 				return errors.New("snapshot destination mount boundary crossed")
 			}
+			if delegated && (rel == "rootfs" || strings.HasPrefix(rel, "rootfs/")) {
+				if e = df.Chmod(0755); e != nil {
+					df.Close()
+					return e
+				}
+			}
 			return errors.Join(df.Sync(), df.Close())
 		}
 		if info.Size() < 0 || info.Size() > MaxSnapshotBytes-report.Bytes {
@@ -221,6 +245,9 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 		if info.Mode().Perm()&0100 != 0 {
 			mode = 0500
 		}
+		if delegated && strings.HasPrefix(rel, "rootfs/") {
+			mode |= mode>>3 | mode>>6
+		}
 		out, e := dst.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 		if e != nil {
 			return e
@@ -233,6 +260,9 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 		n, e := io.CopyN(io.MultiWriter(out, digest), in, info.Size())
 		if e == nil && n != info.Size() {
 			e = io.ErrUnexpectedEOF
+		}
+		if e == nil && delegated {
+			e = out.Chmod(mode)
 		}
 		if e == nil {
 			e = out.Sync()
@@ -263,7 +293,14 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 	if e != nil {
 		return SnapshotReport{}, e
 	}
-	if e = RequireSingleCallerMapping(spec, uint32(os.Geteuid()), uint32(os.Getegid())); e != nil {
+	if delegated {
+		if e = RequireDelegatedMapping(spec); e != nil {
+			return SnapshotReport{}, e
+		}
+		if e = ValidateDelegatedLayout(ctx, dir, spec); e != nil {
+			return SnapshotReport{}, e
+		}
+	} else if e = RequireSingleCallerMapping(spec, uint32(os.Geteuid()), uint32(os.Getegid())); e != nil {
 		return SnapshotReport{}, e
 	}
 	if e = ValidateRuntimeLayout(dir, spec); e != nil {
@@ -290,6 +327,7 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 	if e = errors.Join(df.Sync(), df.Close()); e != nil {
 		return SnapshotReport{}, e
 	}
+	report.DelegatedGuest = delegated
 	report.Directory = dir
 	report.ContentSHA256 = "sha256:" + hex.EncodeToString(digest.Sum(nil))
 	keep = true

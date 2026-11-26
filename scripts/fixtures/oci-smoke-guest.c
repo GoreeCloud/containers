@@ -9,12 +9,16 @@
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/vfs.h>
+#ifndef GC_GUEST_ID
+#define GC_GUEST_ID 0
+#endif
 
 static volatile sig_atomic_t stop;
 static void on_term(int signal_number) { (void)signal_number; stop = 1; }
 
 int main(void) {
-    if (getpid() != 1 || getuid() != 0 || getgid() != 0) return 11;
+    if (getpid() != 1 || getuid() != GC_GUEST_ID || getgid() != GC_GUEST_ID || geteuid() != GC_GUEST_ID || getegid() != GC_GUEST_ID) return 11;
     if (prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) != 1) return 12;
     if (prctl(PR_GET_SECCOMP, 0, 0, 0, 0) != 2) return 13;
     struct __user_cap_header_struct h = { _LINUX_CAPABILITY_VERSION_3, 0 };
@@ -25,7 +29,12 @@ int main(void) {
     errno = 0;
     int fd = open("/readonly-probe", O_CREAT | O_EXCL | O_WRONLY, 0600);
     if (fd >= 0) { close(fd); return 16; }
-    if (errno != EROFS) return 17;
+    if (errno != EROFS && (GC_GUEST_ID == 0 || errno != EACCES)) return 17;
+    fd = open("/", O_RDONLY | O_DIRECTORY);
+    if (fd < 0) return 22;
+    struct statfs root;
+    if (fstatfs(fd, &root) != 0 || !(root.f_flags & 1)) { close(fd); return 23; }
+    close(fd);
     errno = 0;
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd >= 0) { close(fd); return 18; }

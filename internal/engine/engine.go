@@ -246,6 +246,19 @@ func (e *Engine) callWithResources(ctx context.Context, resources *bundle.Resour
 	return e.Runner.Run(ctx, e.Binary, argv...)
 }
 func (e *Engine) Create(ctx context.Context, id, dir string) error {
+	return e.create(ctx, id, dir, false)
+}
+
+// CreateDelegated is a separate opt-in preview; the default retains the
+// original caller-root policy. No subordinate allocation is created here.
+func (e *Engine) CreateDelegated(ctx context.Context, id, dir string) error {
+	if filepath.Base(e.Binary) != "runc" {
+		return errors.New("delegated preview requires reviewed runc")
+	}
+	return e.create(ctx, id, dir, true)
+}
+func (e *Engine) create(ctx context.Context, id, dir string, delegated bool) error {
+
 	return e.mutate(ctx, id, func() error {
 
 		if err := ValidateID(id); err != nil {
@@ -255,7 +268,14 @@ func (e *Engine) Create(ctx context.Context, id, dir string) error {
 		if err != nil {
 			return err
 		}
-		if err := bundle.RequireSingleCallerMapping(spec, uint32(os.Geteuid()), uint32(os.Getegid())); err != nil {
+		if delegated {
+			if err := bundle.RequireDelegatedMapping(spec); err != nil {
+				return err
+			}
+			if err := bundle.ValidateDelegatedLayout(ctx, dir, spec); err != nil {
+				return err
+			}
+		} else if err := bundle.RequireSingleCallerMapping(spec, uint32(os.Geteuid()), uint32(os.Getegid())); err != nil {
 			return err
 		}
 		// Fail invalid guest layouts before entering the journaled runtime call.
