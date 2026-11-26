@@ -145,11 +145,12 @@ func verifyPendingIdentity(root *os.Root, name string, initial os.FileInfo) erro
 	current, err := root.Lstat(name)
 	if err != nil || initial == nil || !os.SameFile(initial, current) ||
 		!current.Mode().IsRegular() || current.Mode().Perm()&0077 != 0 ||
-		current.Size() != initial.Size() || !current.ModTime().Equal(initial.ModTime()) {
+		current.Size() != initial.Size() || current.Mode() != initial.Mode() || !current.ModTime().Equal(initial.ModTime()) {
 		return fmt.Errorf("%w: journal marker changed", ErrUnresolvedMutation)
 	}
 	st, ok := current.Sys().(*syscall.Stat_t)
-	if !ok || st.Uid != uint32(os.Geteuid()) || st.Nlink != 1 {
+	before, okBefore := initial.Sys().(*syscall.Stat_t)
+	if !ok || !okBefore || st.Uid != uint32(os.Geteuid()) || st.Nlink != 1 || before.Ctim != st.Ctim {
 		return fmt.Errorf("%w: journal marker ownership changed", ErrUnresolvedMutation)
 	}
 	return nil
