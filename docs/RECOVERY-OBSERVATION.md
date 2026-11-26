@@ -1,3 +1,5 @@
 # Recovery observation preview
 
 `gcontainers recovery-observe runc|crun ID` takes the cooperative per-ID lock (which may create a private lock file), reads a pending journal marker, queries the trusted runtime only when pending, and rechecks the marker. The report distinguishes an observed runtime state from an unavailable runtime response. It never clears a pending marker, retries a mutation, kills or deletes a workload, or authorizes recovery; a pending incident remains a failing exit code. No pending mutation is not evidence that a workload is healthy. Explicit authenticated reconciliation and durable recovery remain future work.
+
+Recovery observation now rejects replacement of a pending marker even when its content is identical, including inode, mode, length, modification and Linux change-time checks around the runtime read. Synthetic marker replacement and rewrite regressions passed; no marker is cleared and no automated reconciliation is authorized. Same-UID races and runtime backend binding remain outside this evidence.
