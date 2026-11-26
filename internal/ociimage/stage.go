@@ -40,6 +40,7 @@ type LayerInput struct {
 	Media  string
 	Digest string
 	Size   int64
+	DiffID string
 }
 
 // StageLayers builds an inert ordered overlay from at most eight pinned layers.
@@ -50,7 +51,7 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 		return report, errors.New("one to eight layers required")
 	}
 	for _, l := range layers {
-		if l.Reader == nil || !digestPattern.MatchString(l.Digest) || l.Size <= 0 || l.Size > MaxLayerCompressedBytes {
+		if l.Reader == nil || !digestPattern.MatchString(l.Digest) || l.Size <= 0 || l.Size > MaxLayerCompressedBytes || (l.DiffID != "" && !digestPattern.MatchString(l.DiffID)) {
 			return report, errors.New("invalid layer descriptor")
 		}
 	}
@@ -140,7 +141,8 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 	var payload int64
 	for _, l := range layers {
 		tracked := &trackedLayerReader{input: l.Reader, hash: sha256.New()}
-		layer, e := inspectLayer(ctx, tracked, l.Media, func(n string, dir bool, length int64, r io.Reader) error {
+		decoded := sha256.New()
+		layer, e := inspectLayerDecoded(ctx, tracked, l.Media, func(n string, dir bool, length int64, r io.Reader) error {
 			if dir {
 				if files[n] != nil {
 					return errors.New("layer type replacement unsupported")
@@ -162,12 +164,15 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 			}
 			return writeStagedFile(root, files, n, length, r)
 
-		})
+		}, decoded)
 		if e != nil {
 			return report, e
 		}
 		if tracked.bytes != l.Size || "sha256:"+hex.EncodeToString(tracked.hash.Sum(nil)) != l.Digest {
 			return report, errors.New("staged OCI layer descriptor mismatch")
+		}
+		if l.DiffID != "" && "sha256:"+hex.EncodeToString(decoded.Sum(nil)) != l.DiffID {
+			return report, errors.New("uncompressed OCI layer diff ID mismatch")
 		}
 		aggregate.FileCount += layer.FileCount
 		aggregate.DirectoryCount += layer.DirectoryCount
