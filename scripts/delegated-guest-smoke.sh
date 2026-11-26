@@ -2,7 +2,7 @@
 # Only the reviewed first-party synthetic guest; no account or host policy edits.
 set -euo pipefail
 umask 077
-[[ "$#" == 1 && ( "$1" == --prepare-only || "$1" == --execute ) ]]
+[[ ( "$#" == 1 || ( "$#" == 2 && "$2" == --local-io ) ) && ( "$1" == --prepare-only || "$1" == --execute ) ]]
 [[ "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
 cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
 prepare="$(GC_SMOKE_RESOURCES=1 bash scripts/oci-smoke.sh --prepare-only)"
@@ -12,7 +12,7 @@ trap 'echo "Delegated fixture incomplete: preserve private evidence at $workspac
 export XDG_RUNTIME_DIR="$workspace/runtime"
 export PATH=/usr/local/bin:/usr/bin:/bin
 gc="$workspace/gcontainers"
-python3 - "$workspace/bundle" <<'PY'
+python3 - "$workspace/bundle" "${2:-}" <<'PY'
 import json,os,pwd,sys,pathlib
 p=pathlib.Path(sys.argv[1]);u=os.getuid();g=os.getgid();name=pwd.getpwuid(u).pw_name
 def first(f):
@@ -25,12 +25,18 @@ def first(f):
 c=p/"config.json";s=json.loads(c.read_text());s["process"]["user"]={"uid":1000,"gid":1000}
 s["linux"]["uidMappings"].append(dict(containerID=1000,hostID=first("/etc/subuid"),size=1))
 s["linux"]["gidMappings"].append(dict(containerID=1000,hostID=first("/etc/subgid"),size=1))
+if sys.argv[2]=="--local-io":
+ s["linux"]["seccomp"]["syscalls"][0]["names"].extend(["socket","bind","listen","getsockname","connect","accept4","unlink"])
+ s["mounts"].append(dict(destination="/tmp",type="tmpfs",source="tmpfs",options=["nosuid","noexec","nodev","size=67108864","mode=1777"]))
+ (p/"rootfs/tmp").mkdir(mode=0o755)
 c.write_text(json.dumps(s));c.chmod(0o600)
 for d in (p/"rootfs").rglob("*"):
  if d.is_dir():d.chmod(0o755)
 (p/"rootfs").chmod(0o755)
 PY
-gcc -static -O2 -Wall -Wextra -Werror -DGC_GUEST_ID=1000 scripts/fixtures/oci-smoke-guest.c -o "$workspace/bundle/rootfs/bin/probe"
+local_flags=()
+if [[ "${2:-}" == --local-io ]];then local_flags=(-DGC_LOCAL_IO_PROBE);fi
+gcc -static -O2 -Wall -Wextra -Werror -DGC_GUEST_ID=1000 "${local_flags[@]}" scripts/fixtures/oci-smoke-guest.c -o "$workspace/bundle/rootfs/bin/probe"
 chmod 0555 "$workspace/bundle/rootfs/bin/probe"
 "$gc" preflight-delegated "$workspace/bundle" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["mappingVerified"] and r["layoutVerified"] and r["guestNonRoot"] and not r["runtimeInvoked"] and not r["deploymentAuthorized"]'
 echo DELEGATED_PREFLIGHT_PASS
@@ -75,6 +81,7 @@ print("DELEGATED_GUEST_IDENTITY_PASS")
 PY
  "$gc" delegated-observe runc "$id" "$snapshot" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert all(r[k] for k in ("runningObserved","subordinateIdentityObserved","pidNamespaceObserved","zeroCapabilitiesObserved","noNewPrivilegesObserved","seccompFilterObserved","resourceLimitsObserved")) and not r["bundleIdentityVerified"] and not r["deploymentAuthorized"]'
 echo LIVE_DELEGATED_EVIDENCE_PASS
+if [[ "${2:-}" == --local-io ]];then echo ISOLATED_LOOPBACK_AND_TMPFS_PASS;fi
 "$gc" oci stop --runtime runc --id "$id" --experimental
 "$gc" oci delete --runtime runc --id "$id" --experimental
 "$gc" oci pending-summary | python3 -c 'import json,sys;assert json.load(sys.stdin)["pendingCount"]==0'

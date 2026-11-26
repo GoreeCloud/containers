@@ -41,3 +41,13 @@ bash scripts/prepared-bundle-smoke.sh --execute --whiteouts --delegated-guest
 ### Live read-only delegated evidence
 
 Use gcontainers delegated-observe runc ID ABS_BUNDLE to compare a separately reviewed bundle's subordinate mapping and limits with actual running process /proc status under the cooperative ID lock. Verify all four host UID/GID values, nested PID1, zero capability sets, NNP, seccomp filter and configured cgroup limits. Repeat runtime state and process status before reporting. No PIDs or mapping numbers emitted, no mutation, no proof that the specified bundle owns the workload or that health/namespace containment is certified.
+
+### Isolated local I/O acceptance fixture
+
+On the authorized laptop the existing delegated profile ran a separately reviewed first-party static test variant, explicitly allowing the minimum additional socket and scratch-file syscalls in its test configuration. The guest confirmed only loopback was present in its private network namespace, opened a TCP listener on IPv4 loopback with a kernel-selected port, connected only to that listener, transferred and compared synthetic bytes, then created/read/deleted synthetic bytes in the already supported bounded private /tmp tmpfs. The root mount stayed read-only; NNP, seccomp, zero capabilities, host subordinate UID/GID and cgroup evidence passed. Graceful stop/delete and empty pending journal verified. No host socket, route, forwarding, host security or account change. The original socket-denial fixture remains the default and unchanged.
+
+```sh
+bash scripts/delegated-guest-smoke.sh --execute --local-io
+```
+
+This is an actual local I/O fixture, not an inter-container network, gateway, host port publication, network policy controller or persistent volume attachment. The extra syscall list is specific to the reviewed synthetic config, not an authorization for arbitrary networked images. The native Stack controller still refuses its socket syscalls; general networking and durable storage acceptance remain open.
