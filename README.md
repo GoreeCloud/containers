@@ -119,7 +119,7 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - [Ordered inert layer assembly](docs/ASSEMBLY-PREVIEW.md): up to eight pinned layers; no whiteouts, links, executable permissions or full OCI semantics.
 - [Private volume directories](docs/VOLUME-PREVIEW.md): exclusive creation and aggregate inventory; no mounting, quota, backup or deletion.
 - [Local API](docs/LOCAL-API.md) and [client](docs/LOCAL-CLIENT.md): private same-UID Unix socket, read-only health and journal, no TCP or MIPS identity grant.
-- [Recovery observation](docs/RECOVERY-OBSERVATION.md), [start evidence](docs/START-EVIDENCE.md) and [stop evidence](docs/STOP-EVIDENCE.md): preserve uncertain journals; no automatic repair or forced escalation.
+- [Recovery observation](docs/RECOVERY-OBSERVATION.md), [start evidence](docs/START-EVIDENCE.md) and [stop evidence](docs/STOP-EVIDENCE.md): preserve uncertain journals and reject in-place marker changes with Linux change-time evidence; no automatic repair or forced escalation.
 
 ## Experimental inert layer staging
 
