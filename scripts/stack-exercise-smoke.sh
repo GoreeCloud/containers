@@ -99,9 +99,32 @@ PYLOCAL
  session="${values[0]}";receipt="${values[1]}"
  "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"] and not r["recoveryReviewRequired"]'
  if [[ "${2:-}" == --interrupted-stop ]];then
+ # A final-event-only synthetic log must never authorize status or stop.
+ cp -- "$session/events.ndjson" "$workspace/events.saved"
+ tail -n 1 "$workspace/events.saved" > "$session/events.ndjson"
+ if "$gc" stack status-local "$session" "$receipt";then exit 1;fi
+ if "$gc" stack stop-local "$session" "$receipt" --experimental;then exit 1;fi
+ test ! -e "$session/stop-intent"
+ cat "$workspace/events.saved" > "$session/events.ndjson"
+ "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"]'
+ echo PERSISTENT_START_LOG_REJECTION_PASS
+ # Simulate the narrow crash window with the independently retained receipt.
+ head -n -1 "$workspace/events.saved" > "$session/events.ndjson"
+ cp "$session/events.ndjson" "$workspace/start.prefix"
+ if "$gc" stack status-local "$session" "$receipt";then exit 1;fi
+ if "$gc" stack review-start "$session" "$(printf '%064d' 0)";then exit 1;fi
+ "$gc" stack review-start "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["readOnly"] and r["startFinalizationChecksPassed"] and not r["startFinalized"] and r["recoveryReviewRequired"] and r["running"]==3'
+ cmp "$session/events.ndjson" "$workspace/start.prefix"
+ if "$gc" stack finalize-start "$session" "$receipt";then exit 1;fi
+ "$gc" stack finalize-start "$session" "$receipt" --experimental | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["startFinalized"] and not r["recoveryReviewRequired"] and r["running"]==3 and not r["deploymentAuthorized"]'
+ cmp "$session/events.ndjson" "$workspace/events.saved"
+ if "$gc" stack finalize-start "$session" "$receipt" --experimental;then exit 1;fi
+ "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"]'
+ echo PERSISTENT_START_FINALIZATION_PASS
  # Fixture-only interruption simulation: persist exact stop intent, then
  # complete the first reverse wave through the existing isolated OCI CLI.
  # No pending marker is removed and no host or unrelated workload is used.
+ if "$gc" stack review-stop "$session" "$receipt";then exit 1;fi
  if "$gc" stack resume-stop "$session" "$receipt" --experimental;then exit 1;fi
  printf '%s\n' "$receipt" > "$session/stop-intent"
  id="$(python3 - "$session/local-receipt.json" <<'PYINT'
@@ -113,6 +136,11 @@ PYINT
  XDG_RUNTIME_DIR="$session/runtime" "$gc" oci stop --runtime runc --id "$id" --experimental
  XDG_RUNTIME_DIR="$session/runtime" "$gc" oci delete --runtime runc --id "$id" --experimental
  if "$gc" stack stop-local "$session" "$receipt" --experimental;then exit 1;fi
+ if "$gc" stack review-stop "$session" "sha256:$(printf '%064d' 0)";then exit 1;fi
+ "$gc" stack review-stop "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["readOnly"] and r["stopResumeChecksPassed"] and r["recoveryReviewRequired"] and r["running"]==2 and r["missingProcessAbsent"]==1 and not r["cleanupVerified"] and not r["deploymentAuthorized"]'
+ test -f "$workspace/sessions/active-session"
+ test ! -e "$session/cleanup-verified"
+ echo INTERRUPTED_STOP_READ_ONLY_REVIEW_PASS
  "$gc" stack resume-stop "$session" "$receipt" --experimental | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["missingProcessAbsent"]==1 and r["cleanupVerified"] and not r["recoveryReviewRequired"]'
  test ! -e "$workspace/sessions/active-session"
  test -z "$(find "$workspace/leases" -maxdepth 1 -name 'lease-*.json' -print -quit)"

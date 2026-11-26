@@ -258,34 +258,98 @@ func parseLocalReceipt(raw []byte, pin, session, dir string) (localReceipt, erro
 }
 
 type LocalSessionReport struct {
-	ReceiptSHA256          string `json:"receiptSHA256"`
-	Expected               int    `json:"expected"`
-	Running                int    `json:"running"`
-	Stopped                int    `json:"stopped"`
-	Pending                bool   `json:"pending"`
-	BindingsObserved       bool   `json:"bindingsObserved"`
-	MissingProcessAbsent   int    `json:"missingProcessAbsent"`
-	CleanupVerified        bool   `json:"cleanupVerified"`
-	RecoveryReviewRequired bool   `json:"recoveryReviewRequired"`
-	HealthVerified         bool   `json:"healthVerified"`
-	DeploymentAuthorized   bool   `json:"deploymentAuthorized"`
+	ReadOnly                      bool   `json:"readOnly"`
+	StopResumeChecksPassed        bool   `json:"stopResumeChecksPassed"`
+	StartFinalizationChecksPassed bool   `json:"startFinalizationChecksPassed"`
+	StartFinalized                bool   `json:"startFinalized"`
+	ReceiptSHA256                 string `json:"receiptSHA256"`
+	Expected                      int    `json:"expected"`
+	Running                       int    `json:"running"`
+	Stopped                       int    `json:"stopped"`
+	Pending                       bool   `json:"pending"`
+	BindingsObserved              bool   `json:"bindingsObserved"`
+	MissingProcessAbsent          int    `json:"missingProcessAbsent"`
+	CleanupVerified               bool   `json:"cleanupVerified"`
+	RecoveryReviewRequired        bool   `json:"recoveryReviewRequired"`
+	HealthVerified                bool   `json:"healthVerified"`
+	DeploymentAuthorized          bool   `json:"deploymentAuthorized"`
 }
 
 func StartLocal(ctx context.Context, s Spec, admission, pin, store, parent, binary, mappingStore string) (ExerciseReport, error) {
 	return runExercise(ctx, s, admission, pin, store, parent, binary, true, mappingStore)
 }
 
+// validatePersistentEvents reconstructs the exact startup sequence from the
+// independently pinned receipt. Stop waves retain the order within each
+// corresponding start wave; only the order of waves is reversed.
+func validatePersistentEvents(raw []byte, rec localReceipt) error {
+	return validatePersistentPhase(raw, rec, false)
+}
+
+func validatePersistentPhase(raw []byte, rec localReceipt, finalization bool) error {
+	p := InstancePlan{}
+	for n := len(rec.StopWaves) - 1; n >= 0; n-- {
+		w := InstanceWave{Number: len(p.StartWaves)}
+		for _, id := range rec.StopWaves[n] {
+			w.Instances = append(w.Instances, Instance{ID: id})
+		}
+		p.StartWaves = append(p.StartWaves, w)
+	}
+	phase, count, err := auditEvents(raw, p)
+	expectedPhase, expectedCount := "persistent-running-verified", len(expectedExerciseEvents(p))+1
+	if finalization {
+		expectedPhase, expectedCount = "all-running-observed", expectedCount-1
+	}
+	if err != nil || phase != expectedPhase || count != expectedCount {
+		return errors.New("persistent start evidence incomplete or inconsistent")
+	}
+	return nil
+}
+
 // Inspect or stop only the exact receipt selected by the caller. No automatic
 // replay after an interrupted stop, no action on unmatched or pending IDs.
 func ManageLocal(ctx context.Context, dir, pin, binary string, stop bool) (LocalSessionReport, error) {
-	return manageLocal(ctx, dir, pin, binary, stop, false)
+	if stop {
+		return manageLocal(ctx, dir, pin, binary, localStop)
+	}
+	return manageLocal(ctx, dir, pin, binary, localStatus)
 }
 func ResumeLocalStop(ctx context.Context, dir, pin, binary string) (LocalSessionReport, error) {
-	return manageLocal(ctx, dir, pin, binary, true, true)
+	return manageLocal(ctx, dir, pin, binary, localResumeStop)
 }
-func manageLocal(ctx context.Context, dir, pin, binary string, stop, resume bool) (LocalSessionReport, error) {
 
-	var r LocalSessionReport
+// ReviewLocalStop reuses the exact resume preconditions but never mutates a workload or releases a lease.
+func ReviewLocalStop(ctx context.Context, dir, pin, binary string) (LocalSessionReport, error) {
+	return manageLocal(ctx, dir, pin, binary, localReviewStop)
+}
+
+// FinalizeLocalStart covers only a complete, independently pinned receipt
+// with the exact durable all-running prefix and all original live bindings.
+// It never launches or restarts a guest or clears a pending marker.
+func FinalizeLocalStart(ctx context.Context, dir, pin, binary string, apply bool) (LocalSessionReport, error) {
+	if apply {
+		return manageLocal(ctx, dir, pin, binary, localFinalizeStart)
+	}
+	return manageLocal(ctx, dir, pin, binary, localReviewStart)
+}
+
+type localSessionAction uint8
+
+const (
+	localStatus localSessionAction = iota
+	localStop
+	localReviewStop
+	localResumeStop
+	localReviewStart
+	localFinalizeStart
+)
+
+func manageLocal(ctx context.Context, dir, pin, binary string, action localSessionAction) (LocalSessionReport, error) {
+	stop := action == localStop || action == localResumeStop
+	resume := action == localReviewStop || action == localResumeStop
+	finalization := action == localReviewStart || action == localFinalizeStart
+	applyFinalize := action == localFinalizeStart
+	r := LocalSessionReport{ReadOnly: !stop && !applyFinalize, RecoveryReviewRequired: true}
 	if ctx == nil || os.Geteuid() == 0 || filepath.Base(binary) != "runc" || !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
 		return r, errors.New("private local session required")
 	}
@@ -357,17 +421,32 @@ func manageLocal(ctx context.Context, dir, pin, binary string, stop, resume bool
 	if _, e = root.Lstat("cleanup-verified"); !os.IsNotExist(e) {
 		return r, errors.New("cleanup record already exists; manual reservation review required")
 	}
-	log, _, e := readPrivateRecord(root, "events.ndjson", 64<<10)
+	log, logIdentity, e := readPrivateRecord(root, "events.ndjson", 64<<10)
 	if e != nil {
 		return r, e
 	}
-	lines := bytes.Split(bytes.TrimSpace(log), []byte("\n"))
-	var last exerciseEvent
-	if len(lines) == 0 || json.Unmarshal(lines[len(lines)-1], &last) != nil || last.Phase != "persistent-running-verified" {
-		return r, errors.New("persistent start evidence incomplete")
+	if e = validatePersistentPhase(log, rec, finalization); e != nil {
+		return r, e
+	}
+	checkLog := func() error {
+		current, currentIdentity, err := readPrivateRecord(root, "events.ndjson", 64<<10)
+		if err != nil || !os.SameFile(logIdentity, currentIdentity) || !bytes.Equal(log, current) {
+			return errors.New("persistent start evidence changed during operation")
+		}
+		return nil
 	}
 	stateRoot := filepath.Join(dir, "runtime", "goreecloud-containers")
-	if _, e = privateExerciseDir(stateRoot); e != nil {
+	stateIdentity, e := privateExerciseDir(stateRoot)
+	if e != nil {
+		return r, e
+	}
+	checkFinalization := func() error {
+		if !finalization {
+			return nil
+		}
+		return checkStartFinalizationEvidence(root, dir, rec, i, stateIdentity, mapping.identity)
+	}
+	if e = checkFinalization(); e != nil {
 		return r, e
 	}
 	rt, e := engine.New(binary, stateRoot, nil)
@@ -399,7 +478,7 @@ func manageLocal(ctx context.Context, dir, pin, binary string, stop, resume bool
 		}
 		if status == "running" {
 			r.Running++
-		} else if status == "stopped" {
+		} else if status == "stopped" && !finalization {
 			r.Stopped++
 		} else {
 			return r, errors.New("unexpected local state")
@@ -435,8 +514,70 @@ func manageLocal(ctx context.Context, dir, pin, binary string, stop, resume bool
 	if e = check(); e != nil {
 		return r, e
 	}
+	if e = checkMapping(mapping, rec.Mapping, dir); e != nil {
+		return r, e
+	}
+	// Re-read the exact receipt and prior stop intent after inventory observations.
+	confirmed, _, e := readPrivateRecord(root, "local-receipt.json", 64<<10)
+	if e != nil || !bytes.Equal(raw, confirmed) {
+		return r, errors.New("local receipt changed during review")
+	}
+	if resume {
+		intent, _, e := readPrivateRecord(root, "stop-intent", 128)
+		if e != nil || string(intent) != pin+"\n" {
+			return r, errors.New("stop intent changed")
+		}
+	}
+	if e = checkLog(); e != nil {
+		return r, e
+	}
 	r.BindingsObserved = true
-	r.RecoveryReviewRequired = false
+	if finalization {
+		if r.Running != r.Expected {
+			return r, errors.New("all original live bindings required")
+		}
+		if e = checkFinalization(); e != nil {
+			return r, e
+		}
+		r.StartFinalizationChecksPassed = true
+		if !applyFinalize {
+			return r, nil
+		}
+		if e = ctx.Err(); e != nil {
+			return r, e
+		}
+		if e = appendPersistentFinalEvent(root, log, logIdentity, rec); e != nil {
+			return r, e
+		}
+		if e = check(); e != nil {
+			return r, e
+		}
+		if e = checkMapping(mapping, rec.Mapping, dir); e != nil {
+			return r, e
+		}
+		if e = checkFinalization(); e != nil {
+			return r, e
+		}
+		confirmed, _, e := readPrivateRecord(root, "local-receipt.json", 64<<10)
+		if e != nil || !bytes.Equal(raw, confirmed) {
+			return r, errors.New("receipt changed after finalization; preserve session")
+		}
+		observed, e := rt.Inventory(ctx)
+		if e != nil || !reflect.DeepEqual(before, observed) {
+			return r, errors.New("inventory changed after finalization; preserve session")
+		}
+		for _, b := range rec.Bindings {
+			status, err := rt.CheckBinding(ctx, b)
+			if err != nil || status != "running" {
+				return r, errors.New("binding changed after finalization; preserve session")
+			}
+		}
+		r.StartFinalized = true
+		r.RecoveryReviewRequired = false
+		return r, nil
+	}
+	r.StopResumeChecksPassed = resume
+	r.RecoveryReviewRequired = resume
 	if !stop {
 		return r, nil
 	}
@@ -465,6 +606,9 @@ func manageLocal(ctx context.Context, dir, pin, binary string, stop, resume bool
 			return r, e
 		}
 		if e = check(); e != nil {
+			return r, e
+		}
+		if e = checkLog(); e != nil {
 			return r, e
 		}
 		remaining := []string{}
