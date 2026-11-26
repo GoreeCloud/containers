@@ -78,6 +78,8 @@ func run(args []string, out io.Writer) error {
 		return watchCommand(args[1:], out)
 	case "inventory":
 		return inventoryCommand(args[1:], out)
+	case "recovery-assess":
+		return recoveryAssess(args[1:], out)
 	case "recovery-observe":
 		return recoveryObserve(args[1:], out)
 	case "oci":
@@ -106,6 +108,9 @@ func run(args []string, out io.Writer) error {
 		_, err = fmt.Fprintln(out, string(payload))
 		return err
 	case "stack":
+		if len(args) >= 2 && args[1] == "observe" {
+			return stackObserve(args[2:], out)
+		}
 		if len(args) >= 2 && args[1] == "instance-plan" {
 			return instancePlan(args[2:], out)
 		}
@@ -241,6 +246,7 @@ Usage:
   gcontainers wait runc|crun ID SECONDS
   gcontainers watch runc|crun SAMPLES INTERVAL_SECONDS
   gcontainers inventory runc|crun
+  gcontainers recovery-assess runc|crun ID [--expected-observation-sha256 DIGEST]
   gcontainers recovery-observe runc|crun ID
   gcontainers kernel-probe  # inert rootless namespace check, NOT OCI acceptance
   gcontainers image audit --store ABS_EXISTING_STORE_DIR
@@ -250,6 +256,7 @@ Usage:
   gcontainers image verify-layer ABS_TAR_FILE tar|tar+gzip sha256:EXPECTED_64_HEX [DESCRIPTOR_BYTES]
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
   gcontainers host inspect
+  gcontainers stack observe SPEC runc|crun --expected-plan-sha256 DIGEST
   gcontainers stack instance-plan SPEC [--expected-plan-sha256 DIGEST]
   gcontainers stack validate NATIVE_STACK_JSON
   gcontainers stack plan NATIVE_STACK_JSON
