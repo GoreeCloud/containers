@@ -26,6 +26,10 @@ GoreeCloud Containers is being built as the eventual default containerization so
 
 The execution adapter has passed narrow first-party isolated Linux OCI lifecycle tests, including all six namespace comparisons and kernel cgroup readback, but has not passed a comprehensive independent security audit or Stable acceptance. OCI runtimes remain required for execution; this is not a from-scratch kernel runtime. Validation reduces obvious hazards, but cannot certify an arbitrary OCI bundle as safe.
 
+## Local development packaging
+
+A reproducibility check for the Linux amd64 CLI builds a caller-selected exact committed source with Go 1.27.4, no module downloads, deterministic tar/gzip metadata, a source commit record, MIT notice and SHA-256 manifests. This is a private **unsigned development artifact**, not a release, installer, update mechanism, or redistribution authorization. See [package qualification](docs/PACKAGE-PREVIEW.md).
+
 ## Build and try the read-only commands
 
 Requires Linux and Go 1.27 or later.

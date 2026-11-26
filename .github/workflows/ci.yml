@@ -49,6 +49,8 @@ jobs:
         run: bash scripts/index-selection-smoke.sh
       - name: Verify offline OCI import and export round trip
         run: bash scripts/layout-import-smoke.sh
+      - name: Reproducible local development package
+        run: bash scripts/package-preview-smoke.sh
       - name: Vet
         run: go vet ./...
       - name: Build
