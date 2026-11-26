@@ -277,6 +277,25 @@ func StartLocal(ctx context.Context, s Spec, admission, pin, store, parent, bina
 	return runExercise(ctx, s, admission, pin, store, parent, binary, true, mappingStore)
 }
 
+// validatePersistentEvents reconstructs the exact startup sequence from the
+// independently pinned receipt. Stop waves retain the order within each
+// corresponding start wave; only the order of waves is reversed.
+func validatePersistentEvents(raw []byte, rec localReceipt) error {
+	p := InstancePlan{}
+	for n := len(rec.StopWaves) - 1; n >= 0; n-- {
+		w := InstanceWave{Number: len(p.StartWaves)}
+		for _, id := range rec.StopWaves[n] {
+			w.Instances = append(w.Instances, Instance{ID: id})
+		}
+		p.StartWaves = append(p.StartWaves, w)
+	}
+	phase, count, err := auditEvents(raw, p)
+	if err != nil || phase != "persistent-running-verified" || count != len(expectedExerciseEvents(p))+1 {
+		return errors.New("persistent start evidence incomplete or inconsistent")
+	}
+	return nil
+}
+
 // Inspect or stop only the exact receipt selected by the caller. No automatic
 // replay after an interrupted stop, no action on unmatched or pending IDs.
 func ManageLocal(ctx context.Context, dir, pin, binary string, stop bool) (LocalSessionReport, error) {
@@ -364,14 +383,19 @@ func manageLocal(ctx context.Context, dir, pin, binary string, stop, resume bool
 	if _, e = root.Lstat("cleanup-verified"); !os.IsNotExist(e) {
 		return r, errors.New("cleanup record already exists; manual reservation review required")
 	}
-	log, _, e := readPrivateRecord(root, "events.ndjson", 64<<10)
+	log, logIdentity, e := readPrivateRecord(root, "events.ndjson", 64<<10)
 	if e != nil {
 		return r, e
 	}
-	lines := bytes.Split(bytes.TrimSpace(log), []byte("\n"))
-	var last exerciseEvent
-	if len(lines) == 0 || json.Unmarshal(lines[len(lines)-1], &last) != nil || last.Phase != "persistent-running-verified" {
-		return r, errors.New("persistent start evidence incomplete")
+	if e = validatePersistentEvents(log, rec); e != nil {
+		return r, e
+	}
+	checkLog := func() error {
+		current, currentIdentity, err := readPrivateRecord(root, "events.ndjson", 64<<10)
+		if err != nil || !os.SameFile(logIdentity, currentIdentity) || !bytes.Equal(log, current) {
+			return errors.New("persistent start evidence changed during operation")
+		}
+		return nil
 	}
 	stateRoot := filepath.Join(dir, "runtime", "goreecloud-containers")
 	if _, e = privateExerciseDir(stateRoot); e != nil {
@@ -456,6 +480,9 @@ func manageLocal(ctx context.Context, dir, pin, binary string, stop, resume bool
 			return r, errors.New("stop intent changed")
 		}
 	}
+	if e = checkLog(); e != nil {
+		return r, e
+	}
 	r.BindingsObserved = true
 	r.StopResumeChecksPassed = resume
 	r.RecoveryReviewRequired = resume
@@ -487,6 +514,9 @@ func manageLocal(ctx context.Context, dir, pin, binary string, stop, resume bool
 			return r, e
 		}
 		if e = check(); e != nil {
+			return r, e
+		}
+		if e = checkLog(); e != nil {
 			return r, e
 		}
 		remaining := []string{}

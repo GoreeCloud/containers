@@ -99,6 +99,15 @@ PYLOCAL
  session="${values[0]}";receipt="${values[1]}"
  "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"] and not r["recoveryReviewRequired"]'
  if [[ "${2:-}" == --interrupted-stop ]];then
+ # A final-event-only synthetic log must never authorize status or stop.
+ cp -- "$session/events.ndjson" "$workspace/events.saved"
+ tail -n 1 "$workspace/events.saved" > "$session/events.ndjson"
+ if "$gc" stack status-local "$session" "$receipt";then exit 1;fi
+ if "$gc" stack stop-local "$session" "$receipt" --experimental;then exit 1;fi
+ test ! -e "$session/stop-intent"
+ cat "$workspace/events.saved" > "$session/events.ndjson"
+ "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"]'
+ echo PERSISTENT_START_LOG_REJECTION_PASS
  # Fixture-only interruption simulation: persist exact stop intent, then
  # complete the first reverse wave through the existing isolated OCI CLI.
  # No pending marker is removed and no host or unrelated workload is used.
