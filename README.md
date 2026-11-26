@@ -4,7 +4,7 @@
 
 GoreeCloud Containers is being built as the eventual default containerization solution for the GoreeCloud ecosystem, with a design goal of permanently replacing Docker and Podman as the default management engines after independently verified stability. Docker, Docker Compose, and Podman remain optional, second-priority compatibility paths; none is required by the intended stable GoreeCloud Containers engine.
 
-> **Status: 0.1.0-dev / experimental foundation. Not production-ready.** A restricted rootless OCI lifecycle, private content store, digest-pinned HTTPS manifest/blob retrieval with verified cache reuse and inert ordered layer assembly, private volume directories and local read-only API are implemented. Executable OCI image preparation/build, authenticated registry and tag resolution, volume mounting, networking, daemon, Compose execution, GUI, remote control and cluster orchestration are not implemented. Do not migrate production containers.
+> **Status: 0.1.0-dev / experimental foundation. Not production-ready.** A restricted rootless OCI lifecycle, private content store, digest-pinned HTTPS manifest/blob retrieval with verified cache reuse and inert ordered layer assembly, restricted separately pinned static executable bundle preparation, private volume directories and local read-only API are implemented. General executable OCI image preparation/build, authenticated registry and tag resolution, volume mounting, networking, daemon, Compose execution, GUI, remote control and cluster orchestration are not implemented. Do not migrate production containers.
 
 ## Implemented in this development branch
 

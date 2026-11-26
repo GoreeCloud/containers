@@ -1,3 +1,5 @@
 # Restricted pinned executable bundle preparation
 
 The explicit experimental image prepare-bundle command assembles a local manifest with config/layer and diff ID verification. A separate owner-controlled, SHA-256-pinned OCI runtime config and exact SHA-256 pin of the selected staged static native ELF entrypoint are required. Only that entrypoint becomes mode 0500; other data remains inert 0600. Validates the existing rootless OCI profile, mountpoint directories, caller mapping and layout; no image-supplied commands, capabilities, credentials or automated launch. No dynamic ELF, symlinks, whiteouts, full OCI semantics, signature attestation or immutability. Same-user races remain possible. Failure removes the newly allocated tree only if its identity matches. The first-party nonproduction script scripts/prepared-bundle-smoke.sh --execute validates wrong-pin cleanup and actual image-to-bundle-to-rootless lifecycle. Production use remains gated.
+
+The --prepare-only mode runs in protected CI without invoking a runtime; --execute requires the existing audited pinned runc fixture.

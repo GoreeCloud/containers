@@ -2,7 +2,8 @@
 # First-party static fixture; no external image, registry or host change.
 set -euo pipefail
 umask 077
-[[ "$#" == 1 && "$1" == --execute ]] || exit 2
+[[ "$#" == 1 && ( "$1" == --execute || "$1" == --prepare-only ) ]] || exit 2
+mode="$1"
 cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
 prepare="$(GC_SMOKE_RESOURCES=1 bash scripts/oci-smoke.sh --prepare-only)"
 workspace="$(printf '%s\n' "$prepare" | sed -n 's/^Private fixture directory: //p')"
@@ -10,7 +11,6 @@ workspace="$(printf '%s\n' "$prepare" | sed -n 's/^Private fixture directory: //
 gc="$workspace/gcontainers"
 export XDG_RUNTIME_DIR="$workspace/runtime"
 export PATH=/usr/local/bin:/usr/bin:/bin
-printf '%s  %s\n' 50dcc0b257d724fe07f3852c2dda52340223f038227c7572644eec870741223e /usr/local/bin/runc | sha256sum -c -
 mkdir -m 700 "$workspace/prepared"
 python3 - "$workspace" <<'PY'
 import io,tarfile,json,hashlib,pathlib,sys
@@ -34,6 +34,8 @@ test "$(find "$workspace/prepared" -mindepth 1 -maxdepth 1 | wc -l)" -eq 0
 dir="$(python3 -c 'import json,sys,pathlib;s=json.load(sys.stdin);assert s["layoutVerified"] and s["diffIdsVerified"] and not s["executionAuthorized"];assert (pathlib.Path(s["directory"])/"rootfs/bin/probe").stat().st_mode&0o777==0o500;print(s["directory"])' < "$workspace/prepared.json")"
 echo PREPARED_IMAGE_BUNDLE_PASS
 "$gc" preflight "$dir"
+if [[ "$mode" == --prepare-only ]]; then echo PREPARED_IMAGE_NO_RUNTIME_PASS; exit 0; fi
+printf '%s  %s\n' 50dcc0b257d724fe07f3852c2dda52340223f038227c7572644eec870741223e /usr/local/bin/runc | sha256sum -c -
 id=prepared-probe
 "$gc" oci create --runtime runc --id "$id" --bundle "$dir" --experimental
 "$gc" oci start --runtime runc --id "$id" --experimental
