@@ -10,6 +10,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
+	"strings"
 	"syscall"
 )
 
@@ -113,18 +115,19 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 	}
 	defer root.Close()
 	dirs := map[string]bool{".": true}
+	files := map[string]os.FileInfo{}
 	var mkdir func(string) error
 	mkdir = func(n string) error {
 		if dirs[n] {
 			return nil
 		}
-		if len(dirs) >= MaxLayerEntries {
+		if len(dirs)+len(files) >= MaxLayerEntries {
 			return errors.New("staging directory quota exceeded")
 		}
 		if e := mkdir(path.Dir(n)); e != nil {
 			return e
 		}
-		if len(dirs) >= MaxLayerEntries {
+		if len(dirs)+len(files) >= MaxLayerEntries {
 			return errors.New("staging directory quota exceeded")
 		}
 		if e := root.Mkdir(n, 0700); e != nil {
@@ -134,13 +137,12 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 		return nil
 	}
 	var aggregate LayerReport
-	files := map[string]bool{}
 	var payload int64
 	for _, l := range layers {
 		tracked := &trackedLayerReader{input: l.Reader, hash: sha256.New()}
 		layer, e := inspectLayer(ctx, tracked, l.Media, func(n string, dir bool, length int64, r io.Reader) error {
 			if dir {
-				if files[n] {
+				if files[n] != nil {
 					return errors.New("layer type replacement unsupported")
 				}
 				return mkdir(n)
@@ -155,31 +157,11 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 				return errors.New("aggregate layer payload quota exceeded")
 			}
 			payload += length
-			if len(files)+len(dirs) >= MaxLayerEntries && !files[n] {
+			if len(files)+len(dirs) >= MaxLayerEntries && files[n] == nil {
 				return errors.New("aggregate layer entry quota exceeded")
 			}
-			flags := os.O_CREATE | os.O_EXCL | os.O_WRONLY
-			if files[n] {
-				info, e := root.Lstat(n)
-				if e != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
-					return errors.New("unsafe staged replacement")
-				}
-				// All files belong to this newly created unpublished tree.
-				flags = os.O_TRUNC | os.O_WRONLY
-			}
-			f, e := root.OpenFile(n, flags|syscall.O_NOFOLLOW, 0600)
-			files[n] = true
-			if e != nil {
-				return e
-			}
-			written, e := io.CopyN(f, r, length)
-			if e == nil && written != length {
-				e = io.ErrUnexpectedEOF
-			}
-			if e == nil {
-				e = f.Sync()
-			}
-			return errors.Join(e, f.Close())
+			return writeStagedFile(root, files, n, length, r)
+
 		})
 		if e != nil {
 			return report, e
@@ -205,6 +187,108 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 	if e != nil || !os.SameFile(stageInfo, observed) {
 		return report, errors.New("staging identity changed before completion")
 	}
+	// Sync directory entries bottom-up before reporting the tree.
+	names := make([]string, 0, len(dirs))
+	for n := range dirs {
+		names = append(names, n)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if names[i] == "." {
+			return false
+		}
+		if names[j] == "." {
+			return true
+		}
+		di, dj := strings.Count(names[i], "/"), strings.Count(names[j], "/")
+		if di != dj {
+			return di > dj
+		}
+		return names[i] < names[j]
+	})
+	for _, n := range names {
+		f, e := root.Open(n)
+		if e != nil {
+			return report, e
+		}
+		e = errors.Join(f.Sync(), f.Close())
+		if e != nil {
+			return report, e
+		}
+	}
+	f, e := base.Open(".")
+	if e != nil {
+		return report, e
+	}
+	if e = errors.Join(f.Sync(), f.Close()); e != nil {
+		return report, e
+	}
 	committed = true
 	return StagedLayer{Directory: filepath.Join(parent, name), Layer: aggregate, DigestMatches: true, DescriptorSizeVerified: true}, nil
+}
+
+// Never truncate an existing inode: verify its identity and write an exclusive
+// sibling temporary file, then rename over the staged path. A same-UID actor
+// can still race path changes; this is not an adversarial filesystem boundary.
+func writeStagedFile(root *os.Root, files map[string]os.FileInfo, n string, length int64, r io.Reader) error {
+	previous := files[n]
+	if previous != nil {
+		info, e := root.Lstat(n)
+		if e != nil || !os.SameFile(previous, info) || !safeStagedFile(info) {
+			return errors.New("unsafe staged replacement")
+		}
+	}
+	var nonce [16]byte
+	if _, e := rand.Read(nonce[:]); e != nil {
+		return e
+	}
+	tmp := path.Join(path.Dir(n), ".gc-layer-"+hex.EncodeToString(nonce[:]))
+	f, e := root.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
+	if e != nil {
+		return e
+	}
+	defer root.Remove(tmp)
+	written, e := io.CopyN(f, r, length)
+	if e == nil && written != length {
+		e = io.ErrUnexpectedEOF
+	}
+	if e == nil {
+		e = f.Sync()
+	}
+	info, statErr := f.Stat()
+	e = errors.Join(e, statErr, f.Close())
+	if e != nil {
+		return e
+	}
+	if !safeStagedFile(info) {
+		return errors.New("unsafe staged temporary file")
+	}
+	if previous != nil {
+		current, e := root.Lstat(n)
+		if e != nil || !os.SameFile(previous, current) || !safeStagedFile(current) {
+			return errors.New("staged replacement identity changed")
+		}
+		if e = root.Rename(tmp, n); e != nil {
+			return e
+		}
+	} else {
+		if e = root.Link(tmp, n); e != nil {
+			return e
+		}
+		if e = root.Remove(tmp); e != nil {
+			return e
+		}
+	}
+	actual, e := root.Lstat(n)
+	if e != nil || !os.SameFile(info, actual) || !safeStagedFile(actual) {
+		return errors.New("staged output identity changed")
+	}
+	files[n] = actual
+	return nil
+}
+func safeStagedFile(info os.FileInfo) bool {
+	if info == nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
+		return false
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && st.Uid == uint32(os.Geteuid()) && st.Nlink == 1
 }

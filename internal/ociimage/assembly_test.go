@@ -60,3 +60,31 @@ func TestAssemblyRejectsWholeTree(t *testing.T) {
 		t.Fatal("partial tree exposed", e)
 	}
 }
+
+func TestStagedReplacementRefusesHardlink(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("nonroot only")
+	}
+	dir := t.TempDir()
+	root, e := os.OpenRoot(dir)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer root.Close()
+	files := map[string]os.FileInfo{}
+	if e = writeStagedFile(root, files, "data", 3, bytes.NewReader([]byte("old"))); e != nil {
+		t.Fatal(e)
+	}
+	if e = root.Link("data", "alias"); e != nil {
+		t.Fatal(e)
+	}
+	if e = writeStagedFile(root, files, "data", 3, bytes.NewReader([]byte("new"))); e == nil {
+		t.Fatal("hardlinked replacement accepted")
+	}
+	for _, name := range []string{"data", "alias"} {
+		b, e := root.ReadFile(name)
+		if e != nil || string(b) != "old" {
+			t.Fatal("original bytes changed", e)
+		}
+	}
+}
