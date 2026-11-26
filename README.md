@@ -4,7 +4,7 @@
 
 GoreeCloud Containers is being built as the eventual default containerization solution for the GoreeCloud ecosystem, with a design goal of permanently replacing Docker and Podman as the default management engines after independently verified stability. Docker, Docker Compose, and Podman remain optional, second-priority compatibility paths; none is required by the intended stable GoreeCloud Containers engine.
 
-> **Status: 0.1.0-dev / experimental foundation. Not production-ready.** A restricted rootless OCI lifecycle, private content store, digest-pinned HTTPS manifest/blob retrieval with verified cache reuse and inert ordered layer assembly, private volume directories and local read-only API are implemented. Executable OCI image preparation/build, automatic registry authentication exchange and tag resolution, volume mounting, networking, daemon, Compose execution, GUI, remote control and cluster orchestration are not implemented. Do not migrate production containers.
+> **Status: 0.1.0-dev / experimental foundation. Not production-ready.** A restricted rootless OCI lifecycle, private content store, digest-pinned HTTPS manifest/blob retrieval with verified cache reuse and inert ordered layer assembly, restricted separately pinned static executable bundle preparation, private volume directories, explicitly scoped bearer-file retrieval and local read-only API are implemented. General executable OCI image preparation/build, automatic registry authentication exchange and tag resolution, volume mounting, networking, daemon, Compose execution, GUI, remote control and cluster orchestration are not implemented. Do not migrate production containers.
 
 ## Implemented in this development branch
 
@@ -118,6 +118,7 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - [Registry blob retrieval](docs/REGISTRY-PREVIEW.md): explicit HTTPS origin and exact descriptor, no authentication, redirects or full image resolution.
 - [Pinned OCI manifest discovery](docs/MANIFEST-DISCOVERY.md): exact caller-supplied manifest digest and size, typed configuration/layer descriptors, no tag lookup or automatic downloads.
 - [Pinned registry pull and inert staging](docs/STORE-ASSEMBLY.md): retrieve one explicit manifest and its referenced blobs, reuse verified CAS content and verify ordered uncompressed diff IDs. Optional pre-issued repository-scoped bearer file; no automatic credential exchange, executable image or tag resolution.
+- [Restricted executable bundle preparation](docs/PREPARED-BUNDLE.md): separately pinned local OCI config and one static ELF entrypoint; no automatic launch or source trust.
 - [Content-store manifest assembly](docs/STORE-ASSEMBLY.md): verifies pinned manifest, config, compressed descriptors and ordered uncompressed diff IDs in inert staging.
 - [Ordered inert layer assembly](docs/ASSEMBLY-PREVIEW.md): up to eight pinned layers; no whiteouts, links, executable permissions or full OCI semantics.
 - [Private volume directories](docs/VOLUME-PREVIEW.md): exclusive creation, cooperative maximum 1,024 directories and aggregate inventory; no mounting, byte quota, backup or deletion.
