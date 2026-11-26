@@ -74,6 +74,8 @@ func run(args []string, out io.Writer) error {
 		return recoveryObserve(args[1:], out)
 	case "oci":
 		return oci(args[1:], out)
+	case "volume":
+		return volumeCommand(args[1:], out)
 	case "image":
 		return imageCommand(args[1:], out)
 	case "host":
@@ -433,6 +435,9 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "fetch-blob" {
+		return registryBlob(args[1:], out)
+	}
 	if len(args) > 0 && args[0] == "stage-layer" {
 		return imageStageLayer(args[1:], out)
 	}

@@ -122,6 +122,18 @@ func (s *Store) verifyDirectories() error {
 // It streams into a user-private temporary file and hard-links it only after
 // synchronization and digest completion.
 func (s *Store) Put(ctx context.Context, source io.Reader) (BlobInfo, error) {
+	return s.put(ctx, source, "", 0)
+}
+
+// PutVerified admits exact descriptor bytes before publishing a blob.
+func (s *Store) PutVerified(ctx context.Context, source io.Reader, digest string, size int64) (BlobInfo, error) {
+	if !digestPattern.MatchString(digest) || size <= 0 || size > s.maxBytes {
+		return BlobInfo{}, errors.New("invalid pinned blob descriptor")
+	}
+	return s.put(ctx, source, digest, size)
+}
+
+func (s *Store) put(ctx context.Context, source io.Reader, expected string, expectedSize int64) (BlobInfo, error) {
 	var empty BlobInfo
 	if ctx == nil || source == nil {
 		return empty, errors.New("context and input required")
@@ -178,7 +190,7 @@ func (s *Store) Put(ctx context.Context, source io.Reader) (BlobInfo, error) {
 		if count > 0 {
 			idle = 0
 			length += int64(count)
-			if length > s.maxBytes {
+			if length > s.maxBytes || (expected != "" && length > expectedSize) {
 				temporary.Close()
 				return empty, errors.New("image blob exceeds preview quota")
 			}
@@ -211,6 +223,12 @@ func (s *Store) Put(ctx context.Context, source io.Reader) (BlobInfo, error) {
 		return empty, err
 	}
 	digest := "sha256:" + hex.EncodeToString(h.Sum(nil))
+	if expected != "" && (digest != expected || length != expectedSize) {
+		return empty, errors.New("pinned blob descriptor mismatch")
+	}
+	if err := ctx.Err(); err != nil {
+		return empty, err
+	}
 	destination := "blobs/sha256/" + digest[len("sha256:"):]
 	info := BlobInfo{Digest: digest, Size: length}
 	// Existing valid content does not consume additional storage quota.
