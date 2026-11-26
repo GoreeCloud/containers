@@ -1,0 +1,3 @@
+# Bounded lifecycle observation
+
+`gcontainers wait runc|crun ID SECONDS` accepts a canonical 1–60 second limit and polls strict runtime state under cooperative per-ID locks released between samples. It returns stopped only after seeing stopped PID zero. Pending journal, changed observed running PID, created state, missing state, or timeout fails closed. Already-stopped state is allowed. It never signals or deletes a guest, never clears a journal, and never returns an exit code or claims unique process/container instance identity (a same-ID recreation between samples remains possible). A lock file can be created. Synthetic state transition, timeout, pending-marker and PID-change regression tests passed.

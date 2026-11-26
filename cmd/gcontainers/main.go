@@ -72,6 +72,8 @@ func run(args []string, out io.Writer) error {
 		}
 		_, err := fmt.Fprintln(out, "OCI bundle passed preview policy validation (not a security certification)")
 		return err
+	case "wait":
+		return waitCommand(args[1:], out)
 	case "recovery-observe":
 		return recoveryObserve(args[1:], out)
 	case "oci":
@@ -225,6 +227,7 @@ Usage:
   gcontainers volume count PRIVATE_STORE
   gcontainers serve-local ABS_SOCKET --experimental
   gcontainers local-query ABS_SOCKET health|journal
+  gcontainers wait runc|crun ID SECONDS
   gcontainers recovery-observe runc|crun ID
   gcontainers kernel-probe  # inert rootless namespace check, NOT OCI acceptance
   gcontainers image audit --store ABS_EXISTING_STORE_DIR
