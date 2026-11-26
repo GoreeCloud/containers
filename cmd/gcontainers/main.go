@@ -50,6 +50,8 @@ func run(args []string, out io.Writer) error {
 			return errors.New("kernel-probe takes no flags")
 		}
 		return runKernelProbe(out)
+	case "local-query":
+		return localQuery(args[1:], out)
 	case "serve-local":
 		return localAPI(args[1:])
 	case "doctor":
@@ -435,6 +437,9 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "assemble" {
+		return imageAssemble(args[1:], out)
+	}
 	if len(args) > 0 && args[0] == "fetch-blob" {
 		return registryBlob(args[1:], out)
 	}

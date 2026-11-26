@@ -1,0 +1,3 @@
+# Ordered inert layer assembly
+
+`gcontainers image assemble PRIVATE_PARENT (ABS_FILE tar|tar+gzip SHA256 SIZE){1,8} --experimental` verifies each descriptor in the same stream and applies up to eight layers in order to a fresh private data tree. Regular file replacement is supported; links, whiteouts, type changes and privileged metadata are refused. Aggregate unpacked payload is limited to 256 MiB, entries to 4096. All files remain inert mode 0600. A failed layer rejects the entire staged tree, subject to same-UID filesystem race limitations. This is not complete OCI semantics, source provenance, immutable snapshots or execution authorization. Synthetic ordered replacement, bad descriptor, type collision and CLI smoke tests passed.
