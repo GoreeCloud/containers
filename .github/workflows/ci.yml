@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version: "1.27.4"
@@ -22,7 +24,254 @@ jobs:
         run: test -z "$(gofmt -l cmd internal)"
       - name: Test race and coverage
         run: go test -race -cover ./...
+      - name: Critical fail-closed admission regressions
+        run: |
+          set -euo pipefail
+          # Synthetic-only tests: never invoke an OCI container or system runtime.
+          go test -race -count=2 ./internal/engine -run '^TestRuntimeSafetyGate'
+          go test -race -count=2 ./internal/ociimage -run '^TestLayoutReadIdentity'
+          go test -race -count=2 ./internal/stack -run '^TestStackSourceIdentity'
+      - name: Compile and preflight first-party OCI acceptance fixture
+        run: bash scripts/oci-smoke.sh --prepare-only
+      - name: End-to-end inert OCI content-store assembly
+        run: bash scripts/store-assembly-smoke.sh
+      - name: Verify prepared static OCI bundle without execution
+        run: |
+          bash scripts/prepared-bundle-smoke.sh --prepare-only
+          bash scripts/prepared-bundle-smoke.sh --prepare-only --whiteouts
+      - name: Verify private volume backup and restore CLI
+        run: bash scripts/volume-backup-smoke.sh
+      - name: Verify quiesced SQLite database backup and restore
+        run: bash scripts/sqlite-volume-smoke.sh
+      - name: Verify explicit offline OCI whiteout assembly
+        run: bash scripts/whiteout-smoke.sh
+      - name: Verify local multi-platform index selection and assembly
+        run: bash scripts/index-selection-smoke.sh
+      - name: Verify offline OCI import and export round trip
+        run: bash scripts/layout-import-smoke.sh
+      - name: Reproducible local development package
+        run: bash scripts/package-preview-smoke.sh
       - name: Vet
         run: go vet ./...
       - name: Build
         run: go build ./cmd/gcontainers
+      - name: Nonproduction native CLI smoke
+        run: |
+          set -euo pipefail
+          d="$(mktemp -d)"
+          trap 'rm -rf -- "$d"' EXIT
+          printf 'synthetic OCI blob only\n' > "$d/blob"
+          ./gcontainers image import --store "$d/store" --file "$d/blob" --experimental > "$d/import.json"
+          grep -Fq '"Digest": "sha256:' "$d/import.json"
+          ./gcontainers image audit --store "$d/store" > "$d/audit.json"
+          grep -Fq '"readOnly": true' "$d/audit.json"
+          grep -Fq '"verified": true' "$d/audit.json"
+          grep -Fq '"blobCount": 1' "$d/audit.json"
+          grep -Fq '"sourceProvenanceVerified": false' "$d/audit.json"
+          grep -Fq '"operatorReviewRequired": false' "$d/audit.json"
+          ./gcontainers kernel-probe > "$d/kernel-probe.json"
+          grep -Fq '"rootlessCaller": true' "$d/kernel-probe.json"
+          grep -Fq '"ociIsolationVerified": false' "$d/kernel-probe.json"
+          grep -Fq '"seccompVerified": false' "$d/kernel-probe.json"
+          grep -Fq '"cgroupDelegationVerified": false' "$d/kernel-probe.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/kernel-probe.json"
+          if ./gcontainers __kernel-probe-child </dev/null > "$d/invalid-probe-child.json" 2>/dev/null; then
+            echo "Direct namespace helper invocation without parent data accepted" >&2
+            exit 1
+          fi
+          test ! -s "$d/invalid-probe-child.json"
+          tar --format=ustar -cf "$d/layer.tar" -C "$d" blob
+          layer_digest="sha256:$(sha256sum "$d/layer.tar" | cut -d' ' -f1)"
+          ./gcontainers image verify-layer "$d/layer.tar" tar "$layer_digest" > "$d/layer-verified.json"
+          grep -Fq '"digestMatches": true' "$d/layer-verified.json"
+          grep -Fq '"archiveSubsetValid": true' "$d/layer-verified.json"
+          grep -Fq '"sourceProvenanceVerified": false' "$d/layer-verified.json"
+          grep -Fq '"extractionAuthorized": false' "$d/layer-verified.json"
+          layer_bytes="$(wc -c < "$d/layer.tar" | tr -d '[:space:]')"
+          ./gcontainers image verify-layer "$d/layer.tar" tar "$layer_digest" "$layer_bytes" > "$d/layer-descriptor.json"
+          grep -Fq '"descriptorSizeVerified": true' "$d/layer-descriptor.json"
+          grep -Fq '"digestMatches": true' "$d/layer-descriptor.json"
+          grep -Fq '"extractionAuthorized": false' "$d/layer-descriptor.json"
+          if ./gcontainers image verify-layer "$d/layer.tar" tar "$layer_digest" "$((layer_bytes+1))" > "$d/layer-wrong-size.json" 2>/dev/null; then
+            echo "Wrong OCI descriptor compressed byte count accepted" >&2
+            exit 1
+          fi
+          wrong_layer_digest="sha256:$(printf '%064d' 0)"
+          if ./gcontainers image verify-layer "$d/layer.tar" tar "$wrong_layer_digest" > "$d/layer-mismatch.json" 2>/dev/null; then
+            echo "Wrong OCI descriptor SHA256 accepted" >&2
+            exit 1
+          fi
+          printf '%s' 'invalid archive but hash-matching bytes' > "$d/bad-layer.tar"
+          malformed_digest="sha256:$(sha256sum "$d/bad-layer.tar" | cut -d' ' -f1)"
+          if ./gcontainers image verify-layer "$d/bad-layer.tar" tar "$malformed_digest" > "$d/layer-unsafe.json" 2>/dev/null; then
+            echo "Correct digest of invalid archive wrongly accepted" >&2
+            exit 1
+          fi
+          for committed in "$d/store/blobs/sha256/"*; do
+            chmod 0644 "$committed"
+            if ./gcontainers image audit --store "$d/store" > "$d/public-blob.json" 2>/dev/null; then
+              echo "Publicly readable committed blob incorrectly passed store audit" >&2
+              exit 1
+            fi
+            chmod 0600 "$committed"
+          done
+          printf '%s' 'unresolved synthetic bytes' > "$d/store/tmp/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          chmod 600 "$d/store/tmp/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          if ./gcontainers image audit --store "$d/store" > "$d/audit-pending.json" 2>/dev/null; then
+            echo "Unresolved OCI import staging must be a failing audit" >&2
+            exit 1
+          fi
+          grep -Fq '"verified": false' "$d/audit-pending.json"
+          grep -Fq '"operatorReviewRequired": true' "$d/audit-pending.json"
+          test -f "$d/store/tmp/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          rm -- "$d/store/tmp/.ingest-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          if ./gcontainers image audit --store "$d/missing-store" > "$d/missing.json" 2>/dev/null; then
+            echo "Read-only audit must reject a missing store" >&2
+            exit 1
+          fi
+          test ! -e "$d/missing-store"
+          ./gcontainers host inspect > "$d/host.json"
+          grep -Fq '"readOnly": true' "$d/host.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/host.json"
+          grep -Fq '"delegationVerified": false' "$d/host.json"
+          grep -Fq '"isolationVerified": false' "$d/host.json"
+          ./gcontainers stack restart-plan examples/native-stack.json db > "$d/restart.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/restart.json"
+          grep -Fq '"healthVerified": false' "$d/restart.json"
+          ./gcontainers stack shutdown-plan examples/native-stack.json > "$d/shutdown.json"
+          grep -Fq '"dryRun": true' "$d/shutdown.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/shutdown.json"
+          grep -Fq '"liveStateVerified": false' "$d/shutdown.json"
+          grep -Fq '"rollbackVerified": false' "$d/shutdown.json"
+          ./gcontainers stack validate examples/native-stack.json
+          ./gcontainers stack plan examples/native-stack.json > "$d/plan.json"
+          grep -Fq '"dryRun": true' "$d/plan.json"
+          grep -Fq '"specSHA256": "sha256:' "$d/plan.json"
+          grep -Fq '"independentServices": [' "$d/plan.json"
+          source_sha="$(sed -nE 's/^[[:space:]]*"specSHA256": "(sha256:[0-9a-f]{64})".*/\1/p' "$d/plan.json")"
+          test "${#source_sha}" -eq 71
+          ./gcontainers stack revision-check examples/native-stack.json examples/native-stack.json --expected-current-sha256 "$source_sha" > "$d/revision-match.json"
+          grep -Fq '"matchesExpected": true' "$d/revision-match.json"
+          grep -Fq '"liveStateVerified": false' "$d/revision-match.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/revision-match.json"
+          stale_sha="sha256:$(printf '%064d' 0)"
+          if ./gcontainers stack revision-check examples/native-stack.json examples/native-stack.json --expected-current-sha256 "$stale_sha" > "$d/revision-stale.json" 2>/dev/null; then
+            echo "Stale native stack source revision unexpectedly accepted" >&2
+            exit 1
+          fi
+          grep -Fq '"matchesExpected": false' "$d/revision-stale.json"
+          grep -Fq '"manualReviewRequired": true' "$d/revision-stale.json"
+          ./gcontainers stack preflight examples/native-stack.json examples/native-stack.json --expected-current-sha256 "$source_sha" --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/preflight.json"
+          grep -Fq '"sourceAndBudgetChecksPassed": true' "$d/preflight.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/preflight.json"
+          grep -Fq '"liveStateVerified": false' "$d/preflight.json"
+          grep -Fq '"rollbackVerified": false' "$d/preflight.json"
+          # A valid CPU/memory/source review must not implicitly grant
+          # GoreeCloud Identity authority for a proposed replica change.
+          sed '0,/"replicas": 1/s/"replicas": 1/"replicas": 2/' examples/native-stack.json > "$d/replica-changed-stack.json"
+          ./gcontainers stack validate "$d/replica-changed-stack.json"
+          if ./gcontainers stack preflight examples/native-stack.json "$d/replica-changed-stack.json" --expected-current-sha256 "$source_sha" --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/replica-review.json" 2>/dev/null; then
+            echo "Changed stack passed without authenticated Identity operator grant" >&2
+            exit 1
+          fi
+          grep -Fq '"sourceAndBudgetChecksPassed": true' "$d/replica-review.json"
+          grep -Fq '"goreeCloudIdentityReviewRequired": true' "$d/replica-review.json"
+          grep -Fq '"mipsAuthorizationVerified": false' "$d/replica-review.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/replica-review.json"
+          if ./gcontainers stack preflight examples/native-stack.json examples/native-stack.json --expected-current-sha256 "$stale_sha" --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/preflight-stale.json" 2>/dev/null; then
+            echo "Stale combined stack preflight unexpectedly passed" >&2
+            exit 1
+          fi
+          grep -Fq '"sourceAndBudgetChecksPassed": false' "$d/preflight-stale.json"
+          if ./gcontainers stack preflight examples/native-stack.json examples/native-stack.json --expected-current-sha256 "$source_sha" --cpu-milli 100 --memory-mib 1 --max-instances 1 > "$d/preflight-budget.json" 2>/dev/null; then
+            echo "Overcommitted combined stack preflight unexpectedly passed" >&2
+            exit 1
+          fi
+          grep -Fq '"sourceAndBudgetChecksPassed": false' "$d/preflight-budget.json"
+          awk '/"resources":/ && !added {print "      \"secretRefs\": [\"synthetic-private-ref\"],"; added=1} {print}' examples/native-stack.json > "$d/sensitive-stack.json"
+          ./gcontainers stack validate "$d/sensitive-stack.json"
+          if ./gcontainers stack preflight examples/native-stack.json "$d/sensitive-stack.json" --expected-current-sha256 "$source_sha" --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/sensitive-preflight.json" 2>/dev/null; then
+            echo "Unreviewed GoreeCloud Identity/GoreeShield/Wardveil secret reference change was accepted" >&2
+            exit 1
+          fi
+          grep -Fq '"sourceAndBudgetChecksPassed": true' "$d/sensitive-preflight.json"
+          grep -Fq '"sensitivePolicyReviewRequired": true' "$d/sensitive-preflight.json"
+          grep -Fq '"goreeCloudIdentityReviewRequired": true' "$d/sensitive-preflight.json"
+          grep -Fq '"goreeShieldReviewRequired": true' "$d/sensitive-preflight.json"
+          grep -Fq '"wardveilReviewRequired": true' "$d/sensitive-preflight.json"
+          grep -Fq '"mipsAuthorizationVerified": false' "$d/sensitive-preflight.json"
+          original_image="$(printf 'a%.0s' {1..64})"
+          different_image="$(printf 'c%.0s' {1..64})"
+          sed "s/sha256:$original_image/sha256:$different_image/" examples/native-stack.json > "$d/image-changed-stack.json"
+          ./gcontainers stack validate "$d/image-changed-stack.json"
+          if ./gcontainers stack preflight examples/native-stack.json "$d/image-changed-stack.json" --expected-current-sha256 "$source_sha" --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/image-change-preflight.json" 2>/dev/null; then
+            echo "Unreviewed OCI image digest change unexpectedly authorized" >&2
+            exit 1
+          fi
+          grep -Fq '"sourceAndBudgetChecksPassed": true' "$d/image-change-preflight.json"
+          grep -Fq '"sensitivePolicyReviewRequired": true' "$d/image-change-preflight.json"
+          grep -Fq '"imageReferenceChangeCount": 1' "$d/image-change-preflight.json"
+          grep -Fq '"imageProvenanceVerified": false' "$d/image-change-preflight.json"
+          grep -Fq '"wardveilReviewRequired": true' "$d/image-change-preflight.json"
+          grep -Fq '"goreeShieldReviewRequired": true' "$d/image-change-preflight.json"
+          grep -Fq '"goreeCloudIdentityReviewRequired": true' "$d/image-change-preflight.json"
+          if grep -Fq "$different_image" "$d/image-change-preflight.json"; then
+            echo "Image digest leaked in privacy-minimized preflight report" >&2
+            exit 1
+          fi
+          if grep -Fq "synthetic-private-ref" "$d/sensitive-preflight.json"; then
+            echo "Secret reference identifiers leaked into preflight report" >&2
+            exit 1
+          fi
+          ./gcontainers stack diff examples/native-stack.json examples/native-stack.json > "$d/diff.json"
+          grep -Fq '"dryRun": true' "$d/diff.json"
+          grep -Fq '"manualReviewRequired": false' "$d/diff.json"
+          ./gcontainers stack impact examples/native-stack.json examples/native-stack.json > "$d/impact.json"
+          grep -Fq '"dryRun": true' "$d/impact.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/impact.json"
+          grep -Fq '"rollbackVerified": false' "$d/impact.json"
+          mkdir -m 700 "$d/xdg" "$d/xdg/goreecloud-containers" "$d/xdg/goreecloud-containers/journal"
+          XDG_RUNTIME_DIR="$d/xdg" ./gcontainers oci pending --id example > "$d/pending.json"
+          grep -Fq '"pending": false' "$d/pending.json"
+          grep -Fq '"readOnly": true' "$d/pending.json"
+          grep -Fq '"recoveryRequired": false' "$d/pending.json"
+          XDG_RUNTIME_DIR="$d/xdg" ./gcontainers oci pending-summary > "$d/census.json"
+          grep -Fq '"pendingCount": 0' "$d/census.json"
+          grep -Fq '"runtimeStateVerified": false' "$d/census.json"
+          printf '%s' '{"version":1,"id":"example","operation":"create"}' > "$d/xdg/goreecloud-containers/journal/example.pending"
+          chmod 600 "$d/xdg/goreecloud-containers/journal/example.pending"
+          if XDG_RUNTIME_DIR="$d/xdg" ./gcontainers oci pending-summary > "$d/pending-census.json" 2>/dev/null; then
+            echo "Unresolved synthetic OCI mutation must fail journal census" >&2
+            exit 1
+          fi
+          grep -Fq '"pendingCount": 1' "$d/pending-census.json"
+          grep -Fq '"recoveryRequired": true' "$d/pending-census.json"
+          if grep -Fq 'example' "$d/pending-census.json"; then
+            echo "Private OCI container ID leaked in census" >&2
+            exit 1
+          fi
+          rm -- "$d/xdg/goreecloud-containers/journal/example.pending"
+          ./gcontainers stack capacity examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/capacity.json"
+          grep -Fq '"withinLimits": true' "$d/capacity.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/capacity.json"
+          ./gcontainers stack transition-capacity examples/native-stack.json examples/native-stack.json --cpu-milli 4000 --memory-mib 2048 --max-instances 16 > "$d/transition-capacity.json"
+          grep -Fq '"withinBudget": true' "$d/transition-capacity.json"
+          grep -Fq '"deploymentAuthorized": false' "$d/transition-capacity.json"
+          grep -Fq '"rollbackVerified": false' "$d/transition-capacity.json"
+          if ./gcontainers stack transition-capacity examples/native-stack.json examples/native-stack.json --cpu-milli 100 --memory-mib 1 --max-instances 1 > "$d/transition-overcommit.json" 2>/dev/null; then
+            echo "Oversubscribed native transition must fail closed" >&2
+            exit 1
+          fi
+          grep -Fq '"withinBudget": false' "$d/transition-overcommit.json"
+          if ./gcontainers stack capacity examples/native-stack.json --cpu-milli 100 --memory-mib 1 --max-instances 1 > "$d/overcommit.json"; then
+            echo "Oversubscribed native stack budget must fail closed" >&2
+            exit 1
+          fi
+          grep -Fq '"withinLimits": false' "$d/overcommit.json"
+          tar -C "$d" -cf "$d/layer.tar" blob
+          ./gcontainers image inspect-layer "$d/layer.tar" tar > "$d/layer.json"
+          grep -Fq '"fileCount": 1' "$d/layer.json"
+          if ./gcontainers stack apply examples/native-stack.json; then
+            echo "Unimplemented stack apply should fail closed" >&2
+            exit 1
+          fi

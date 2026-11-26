@@ -1,0 +1,3 @@
+# Post-start runtime evidence
+
+The journaled start operation now requires a trusted runtime state response showing the matching container ID, running state and positive PID before clearing the pending marker. Success from the runtime launcher alone is insufficient. Unavailable or unexpected state, including a guest that exits immediately, preserves the pending marker and blocks subsequent mutation until reviewed. This is deliberately conservative: short-lived jobs require a future supervised exit-status contract. It does not automatically signal, restart, delete, or reconcile workloads. Synthetic running/created/stopped/unavailable regression cases passed; a real first-party isolated snapshot lifecycle with six namespaces and cgroup readback passed.
