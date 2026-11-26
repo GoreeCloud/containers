@@ -86,5 +86,9 @@ func Query(ctx context.Context, socket, endpoint string) (json.RawMessage, int, 
 	if e != nil || len(b) > 16384 || !json.Valid(b) {
 		return nil, 0, errors.New("invalid bounded local response")
 	}
-	return json.RawMessage(b), resp.StatusCode, nil
+	validated, e := validateResponse(b, endpoint, resp.StatusCode)
+	if e != nil {
+		return nil, 0, e
+	}
+	return validated, resp.StatusCode, nil
 }
