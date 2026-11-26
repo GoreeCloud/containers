@@ -23,10 +23,11 @@ func WithContainerLock(ctx context.Context, stateRoot, id string, action func() 
 	if err := ValidateID(id); err != nil {
 		return err
 	}
-	if !filepath.IsAbs(stateRoot) {
+	if !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) != stateRoot {
 		return errors.New("absolute state directory required")
 	}
-	if err := privateDir(stateRoot); err != nil {
+	before, err := capturePrivateRuntimeRoot(stateRoot)
+	if err != nil {
 		return err
 	}
 	root, err := os.OpenRoot(stateRoot)
@@ -38,8 +39,8 @@ func WithContainerLock(ctx context.Context, stateRoot, id string, action func() 
 	if err != nil {
 		return err
 	}
-	if err := privateStateInfo(checked); err != nil {
-		return err
+	if privateStateInfo(checked) != nil || !os.SameFile(before, checked) {
+		return errors.New("runtime root changed while opening lock")
 	}
 	info, err := root.Lstat("locks")
 	if err != nil {
@@ -97,7 +98,17 @@ func WithContainerLock(ctx context.Context, stateRoot, id string, action func() 
 	if err := verifyAcquiredContainerLock(root, lockPath, opened); err != nil {
 		return err
 	}
-	return action()
+	if err := verifyRuntimeDirectories(root, stateRoot, before, "locks", info); err != nil {
+		return err
+	}
+	actionErr := action()
+	if err := verifyRuntimeDirectories(root, stateRoot, before, "locks", info); err != nil {
+		return errors.Join(actionErr, err)
+	}
+	if err := verifyAcquiredContainerLock(root, lockPath, opened); err != nil {
+		return errors.Join(actionErr, err)
+	}
+	return actionErr
 }
 
 // privateStateInfo enforces only local ownership/permissions; it cannot
@@ -125,6 +136,39 @@ func verifyAcquiredContainerLock(root *os.Root, name string, opened os.FileInfo)
 	st, ok := current.Sys().(*syscall.Stat_t)
 	if !ok || st.Uid != uint32(os.Geteuid()) || st.Nlink != 1 {
 		return errors.New("OCI cooperative lock owner or hardlink changed during acquisition")
+	}
+	return nil
+}
+
+// Check both externally named and anchored directories before admission and
+// after observation; never treat a replacement private root as the old root.
+func capturePrivateRuntimeRoot(name string) (os.FileInfo, error) {
+	real, err := filepath.EvalSymlinks(name)
+	if err != nil || real != name {
+		return nil, errors.New("runtime root requires non-symlink absolute path")
+	}
+	before, err := os.Lstat(name)
+	if err != nil || privateStateInfo(before) != nil {
+		return nil, errors.New("unsafe runtime root")
+	}
+	return before, nil
+}
+func verifyRuntimeDirectories(root *os.Root, name string, before os.FileInfo, sub string, subBefore os.FileInfo) error {
+	actual, err := capturePrivateRuntimeRoot(name)
+	if err != nil || !os.SameFile(before, actual) {
+		return errors.New("runtime root identity changed; recovery review required")
+	}
+	anchor, err := root.Lstat(".")
+	if err != nil || privateStateInfo(anchor) != nil || !os.SameFile(before, anchor) {
+		return errors.New("anchored runtime root changed")
+	}
+	child, err := root.Lstat(sub)
+	if err != nil || privateStateInfo(child) != nil || !os.SameFile(subBefore, child) {
+		return errors.New("runtime control directory changed; recovery review required")
+	}
+	external, err := os.Lstat(filepath.Join(name, sub))
+	if err != nil || privateStateInfo(external) != nil || !os.SameFile(subBefore, external) {
+		return errors.New("external runtime control directory changed")
 	}
 	return nil
 }
