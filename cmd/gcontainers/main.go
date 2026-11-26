@@ -435,6 +435,9 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "assemble" {
+		return imageAssemble(args[1:], out)
+	}
 	if len(args) > 0 && args[0] == "fetch-blob" {
 		return registryBlob(args[1:], out)
 	}
