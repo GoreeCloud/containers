@@ -33,6 +33,8 @@ jobs:
           go test -race -count=2 ./internal/stack -run '^TestStackSourceIdentity'
       - name: Compile and preflight first-party OCI acceptance fixture
         run: bash scripts/oci-smoke.sh --prepare-only
+      - name: End-to-end inert OCI content-store assembly
+        run: bash scripts/store-assembly-smoke.sh
       - name: Vet
         run: go vet ./...
       - name: Build
