@@ -44,6 +44,8 @@ type ExerciseReview struct {
 }
 type ExerciseReport struct {
 	ExerciseReview
+	Persistent                   bool   `json:"persistent,omitempty"`
+	ReceiptSHA256                string `json:"receiptSHA256,omitempty"`
 	SessionDirectory             string `json:"sessionDirectory,omitempty"`
 	Prepared                     int    `json:"prepared"`
 	CompletedWaves               int    `json:"completedWaves"`
@@ -252,6 +254,13 @@ func running(ctx context.Context, r exerciseRuntime, id string) error {
 	return nil
 }
 func executeWaves(ctx context.Context, r exerciseRuntime, p InstancePlan, dirs map[string]string, record eventWriter, report *ExerciseReport) error {
+	if e := startWaves(ctx, r, p, dirs, record, report); e != nil {
+		return e
+	}
+	return stopWaves(ctx, r, p, record, report)
+}
+func startWaves(ctx context.Context, r exerciseRuntime, p InstancePlan, dirs map[string]string, record eventWriter, report *ExerciseReport) error {
+
 	if ctx == nil || r == nil || record == nil || report == nil {
 		return errors.New("exercise context required")
 	}
@@ -305,6 +314,9 @@ func executeWaves(ctx context.Context, r exerciseRuntime, p InstancePlan, dirs m
 	if e := record(exerciseEvent{Phase: "all-running-observed"}); e != nil {
 		return e
 	}
+	return nil
+}
+func stopWaves(ctx context.Context, r exerciseRuntime, p InstancePlan, record eventWriter, report *ExerciseReport) error {
 	for n, ids := range p.StopWaves {
 		if e := record(exerciseEvent{"stop-intent", n + 1, ids}); e != nil {
 			return e
@@ -402,6 +414,10 @@ func checkExerciseBundle(s *bundle.Spec, i Instance) (uint32, uint32, error) {
 // deployment admission. Each run allocates a fresh private runtime root and
 // never targets existing runtime IDs. Prepared bytes and evidence are kept.
 func RunExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, parent, runtimeBinary string) (ExerciseReport, error) {
+	return runExercise(ctx, s, admissionPath, pin, storePath, parent, runtimeBinary, false, "")
+}
+func runExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, parent, runtimeBinary string, persistent bool, mappingStore string) (ExerciseReport, error) {
+
 	var report ExerciseReport
 	if ctx == nil || os.Geteuid() == 0 || filepath.Base(runtimeBinary) != "runc" {
 		return report, errors.New("rootless runc exercise required")
@@ -420,16 +436,55 @@ func RunExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 	if e != nil {
 		return report, e
 	}
+	var lease, mapping *localLease
+	var mappingRef mappingReference
+	if persistent {
+		lease, e = acquireLocalLease(ctx, parent)
+		if e != nil {
+			return report, e
+		}
+		defer lease.close()
+		if e = lease.requireVacant(); e != nil {
+			return report, e
+		}
+		mapping, e = acquireMappingStore(ctx, mappingStore, parent)
+		if e != nil {
+			return report, e
+		}
+		defer mapping.close()
+		if _, e = scanMappingRecords(mapping); e != nil {
+			return report, e
+		}
+
+	}
 	dir, e := os.MkdirTemp(parent, "stack-exercise-")
 	if e != nil {
 		return report, e
 	}
 	report.SessionDirectory = dir
+	if persistent {
+		report.Persistent = true
+		report.RecoveryReviewRequired = true
+		if e = lease.reserve(filepath.Base(dir)); e != nil {
+			return report, e
+		}
+	}
+
 	identity, e := privateExerciseDir(dir)
 	if e != nil {
 		return report, e
 	}
 	check := func() error {
+		if persistent {
+			if e := lease.checkActive(filepath.Base(dir)); e != nil {
+				return e
+			}
+			if mappingRef.Name != "" {
+				if e := checkMapping(mapping, mappingRef, dir); e != nil {
+					return e
+				}
+			}
+		}
 		a, e := privateExerciseDir(parent)
 		if e != nil || !os.SameFile(a, parentID) {
 			return errors.New("exercise parent identity changed")
@@ -521,6 +576,38 @@ func RunExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 			report.Prepared++
 		}
 	}
+	if persistent {
+		mappingRef, e = reserveMappings(mapping, dir, uids, gids)
+		if e != nil {
+			if errors.Is(e, errMappingInUse) {
+				if release := lease.release(filepath.Base(dir)); release != nil {
+					return report, errors.Join(e, release)
+				}
+				report.RecoveryReviewRequired = false
+			}
+			return report, e
+		}
+		// Preserve reservation reference even if the start is interrupted before
+		// the final runtime receipt is available.
+		raw, err := json.Marshal(mappingRef)
+		if err != nil {
+			return report, err
+		}
+		f, err := root.OpenFile("mapping-reservation.json", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			return report, err
+		}
+		_, err = f.Write(raw)
+		if err == nil {
+			err = f.Sync()
+		}
+		if err = errors.Join(err, f.Close()); err != nil {
+			return report, err
+		}
+		if err = syncDirectory(root); err != nil {
+			return report, err
+		}
+	}
 	if e = record(exerciseEvent{Phase: "all-bundles-prepared"}); e != nil {
 		return report, e
 	}
@@ -569,6 +656,39 @@ func RunExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 	}
 	if e = check(); e != nil {
 		return report, e
+	}
+	if persistent {
+		// Reserve durable ownership BEFORE mutations; all failures retain it.
+		if e = startWaves(ctx, isolatedRuntime{rt: rt, ids: ids, dirs: dirs}, p, dirs, record, &report); e != nil {
+			return report, e
+		}
+		rec := localReceipt{Version: 1, Session: filepath.Base(dir), PlanSHA256: p.PlanSHA256, AdmissionSHA256: pin, StopWaves: p.StopWaves, Mapping: mappingRef, Bindings: map[string]engine.InstanceBinding{}}
+		for _, w := range p.StartWaves {
+			for _, i := range w.Instances {
+				b, err := rt.CaptureBinding(ctx, ids[i.ID], dirs[i.ID])
+				if err != nil {
+					return report, err
+				}
+				rec.Bindings[i.ID] = b
+			}
+		}
+		if e = check(); e != nil {
+			return report, e
+		}
+		receiptPin, err := writeLocalReceipt(root, rec)
+		if err != nil {
+			return report, err
+		}
+		report.ReceiptSHA256 = receiptPin
+		if e = record(exerciseEvent{Phase: "persistent-running-verified"}); e != nil {
+			return report, e
+		}
+		if e = lease.checkActive(rec.Session); e != nil {
+			return report, e
+		}
+		report.AllDelegatedEvidenceObserved = true
+		report.RecoveryReviewRequired = false
+		return report, nil
 	}
 	if e = executeWaves(ctx, isolatedRuntime{rt: rt, ids: ids, dirs: dirs}, p, dirs, record, &report); e != nil {
 		return report, e

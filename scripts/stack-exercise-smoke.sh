@@ -2,7 +2,7 @@
 # Explicit first-party synthetic image, never production; no host allocation edits.
 set -euo pipefail
 umask 077
-[[ "$#" == 1 && "$1" == --execute && "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
+[[ ( "$#" == 1 || ( "$#" == 2 && ( "$2" == --persistent || "$2" == --persistent-soak || "$2" == --natural-exit || "$2" == --interrupted-stop ) ) ) && "$1" == --execute && "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
 cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
 printf '%s  %s\n' 50dcc0b257d724fe07f3852c2dda52340223f038227c7572644eec870741223e /usr/local/bin/runc | sha256sum -c -
 prepare="$(GC_SMOKE_RESOURCES=1 bash scripts/oci-smoke.sh --prepare-only)"
@@ -13,8 +13,10 @@ trap 'echo "Incomplete exercise: inspect $workspace; no forced cleanup" >&2' ERR
 export PATH=/usr/local/bin:/usr/bin:/bin
 export XDG_RUNTIME_DIR="$workspace/runtime"
 gc="$workspace/gcontainers"
-gcc -static -O2 -Wall -Wextra -Werror -DGC_GUEST_ID=1000 scripts/fixtures/oci-smoke-guest.c -o "$workspace/bundle/rootfs/bin/probe"
-mkdir -m 700 "$workspace/sessions"
+ticks=300
+case "${2:-}" in --persistent-soak) ticks=900;; --natural-exit) ticks=120;; esac
+gcc -static -O2 -Wall -Wextra -Werror -DGC_GUEST_ID=1000 -DGC_GUEST_TICKS="$ticks" scripts/fixtures/oci-smoke-guest.c -o "$workspace/bundle/rootfs/bin/probe"
+mkdir -m 700 "$workspace/sessions" "$workspace/leases" "$workspace/other-sessions"
 python3 - "$workspace" <<'PY'
 import io,tarfile,json,hashlib,pathlib,sys
 p=pathlib.Path(sys.argv[1]);exe=(p/"bundle/rootfs/bin/probe").read_bytes()
@@ -57,6 +59,83 @@ pin="$(cat "$workspace/admission.pin")"
 "$gc" stack review-exercise "$workspace/stack.json" "$workspace/admission.json" "$pin" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["instances"]==3 and r["waves"]==2 and r["readOnly"] and not r["deploymentAuthorized"]'
 if "$gc" stack exercise "$workspace/stack.json" "$workspace/admission.json" "sha256:$(printf '%064d' 0)" "$workspace/store" "$workspace/sessions" --experimental;then exit 1;fi
 test -z "$(find "$workspace/sessions" -mindepth 1 -maxdepth 1 -print -quit)"
+if [[ "${2:-}" == --persistent || "${2:-}" == --persistent-soak || "${2:-}" == --natural-exit || "${2:-}" == --interrupted-stop ]];then
+ "$gc" stack start-local "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" "$workspace/leases" --experimental > "$workspace/local.json"
+ mapfile -t values < <(python3 - "$workspace/local.json" <<'PYLOCAL'
+import json,sys
+r=json.load(open(sys.argv[1]));assert r["persistent"] and r["allDelegatedEvidenceObserved"] and r["completedWaves"]==2 and not r["cleanupVerified"] and not r["deploymentAuthorized"]
+print(r["sessionDirectory"]);print(r["receiptSHA256"])
+PYLOCAL
+ )
+ session="${values[0]}";receipt="${values[1]}"
+ "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"] and not r["recoveryReviewRequired"]'
+ if [[ "${2:-}" == --interrupted-stop ]];then
+ # Fixture-only interruption simulation: persist exact stop intent, then
+ # complete the first reverse wave through the existing isolated OCI CLI.
+ # No pending marker is removed and no host or unrelated workload is used.
+ if "$gc" stack resume-stop "$session" "$receipt" --experimental;then exit 1;fi
+ printf '%s\n' "$receipt" > "$session/stop-intent"
+ id="$(python3 - "$session/local-receipt.json" <<'PYINT'
+import json,sys
+r=json.load(open(sys.argv[1]));assert len(r["stopWaves"][0])==1
+print(r["bindings"][r["stopWaves"][0][0]]["id"])
+PYINT
+ )"
+ XDG_RUNTIME_DIR="$session/runtime" "$gc" oci stop --runtime runc --id "$id" --experimental
+ XDG_RUNTIME_DIR="$session/runtime" "$gc" oci delete --runtime runc --id "$id" --experimental
+ if "$gc" stack stop-local "$session" "$receipt" --experimental;then exit 1;fi
+ "$gc" stack resume-stop "$session" "$receipt" --experimental | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["missingProcessAbsent"]==1 and r["cleanupVerified"] and not r["recoveryReviewRequired"]'
+ test ! -e "$workspace/sessions/active-session"
+ test -z "$(find "$workspace/leases" -maxdepth 1 -name 'lease-*.json' -print -quit)"
+ echo INTERRUPTED_STOP_RESUME_PASS
+ exit 0
+ fi
+ if [[ "${2:-}" == --natural-exit ]];then
+ for n in {1..25};do
+  "$gc" stack status-local "$session" "$receipt" > "$workspace/status.json"
+  stopped="$(python3 -c 'import json,sys;print(json.load(sys.stdin)["stopped"])' < "$workspace/status.json")"
+  [[ "$stopped" == 3 ]] && break
+  sleep 1
+ done
+ [[ "$stopped" == 3 ]]
+ "$gc" stack stop-local "$session" "$receipt" --experimental | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["cleanupVerified"] and not r["recoveryReviewRequired"]'
+ test ! -e "$workspace/sessions/active-session"
+ test -z "$(find "$workspace/leases" -maxdepth 1 -name 'lease-*.json' -print -quit)"
+ echo NATURAL_EXIT_CLEANUP_PASS
+ exit 0
+ fi
+ if [[ "${2:-}" == --persistent-soak ]];then
+  for n in {1..6};do
+   sleep 10
+   "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"] and not r["recoveryReviewRequired"]'
+   echo "SOAK_SAMPLE_$n"
+  done
+  echo SIXTY_SECOND_STACK_SOAK_PASS
+ fi
+ if "$gc" stack start-local "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" "$workspace/leases" --experimental;then exit 1;fi
+ if "$gc" stack start-local "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/other-sessions" "$workspace/leases" --experimental;then exit 1;fi
+ test ! -e "$workspace/other-sessions/active-session"
+ if "$gc" stack stop-local "$session" "sha256:$(printf '%064d' 0)" --experimental;then exit 1;fi
+ "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;assert json.load(sys.stdin)["running"]==3'
+ "$gc" stack stop-local "$session" "$receipt" --experimental | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["cleanupVerified"] and not r["recoveryReviewRequired"]'
+ test ! -e "$workspace/sessions/active-session"
+ test -z "$(find "$workspace/leases" -maxdepth 1 -name 'lease-*.json' -print -quit)"
+ test -f "$session/cleanup-verified"
+ if "$gc" stack stop-local "$session" "$receipt" --experimental;then exit 1;fi
+ # A fresh generation can reuse the same dedicated private slot after cleanup.
+ "$gc" stack start-local "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" "$workspace/leases" --experimental > "$workspace/next.json"
+ mapfile -t next < <(python3 - "$workspace/next.json" <<'PYNEXT'
+import json,sys
+r=json.load(open(sys.argv[1]));print(r["sessionDirectory"]);print(r["receiptSHA256"])
+PYNEXT
+ )
+ [[ "${next[0]}" != "$session" && "${next[1]}" != "$receipt" ]]
+ "$gc" stack stop-local "${next[0]}" "${next[1]}" --experimental | python3 -c 'import json,sys;assert json.load(sys.stdin)["cleanupVerified"]'
+ test ! -e "$workspace/sessions/active-session"
+ test -z "$(find "$workspace/leases" -maxdepth 1 -name 'lease-*.json' -print -quit)"
+ echo PERSISTENT_LOCAL_STACK_PASS
+ exit 0
+fi
 "$gc" stack exercise "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" --experimental > "$workspace/exercise.json"
 python3 - "$workspace" <<'PY'
 import json,pathlib,sys
