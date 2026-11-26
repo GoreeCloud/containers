@@ -48,3 +48,23 @@ for name,counts in (("first",(4,0)),("second",(0,4))):
 PY
 "$gc" image audit --store "$work/store" >/dev/null
 echo OFFLINE_LAYOUT_IMPORT_PASS
+
+mkdir -m 700 "$work/exports" "$work/roundtrip"
+if "$gc" image export-layout "$work/store" "${pins[1]}" "${pins[2]}" "$work/exports" --experimental;then exit 1;fi
+"$gc" image export-layout "$work/store" "${pins[1]}" "${pins[2]}" "$work/exports" --whiteouts --experimental > "$work/export.json"
+mapfile -t exported < <(python3 - "$work/export.json" <<'PYEXPORT'
+import json,sys
+r=json.load(open(sys.argv[1]));assert r["verifiedBlobs"]==4 and r["diffIdsVerified"] and r["archiveSubsetVerified"] and not r["sourceProvenanceVerified"] and not r["executionAuthorized"]
+print(r["directory"]);print(r["indexDigest"]);print(r["manifestDigest"]);print(r["manifestSize"])
+PYEXPORT
+)
+"$gc" image verify "${exported[0]}" >/dev/null
+"$gc" image import --store "$work/second-store" --file "$work/seed" --experimental >/dev/null
+"$gc" image import-layout "$work/second-store" "${exported[0]}" "${exported[1]}" "${exported[2]}" "${exported[3]}" "$work/roundtrip" --whiteouts --experimental > "$work/roundtrip.json"
+python3 - "$work" <<'PYROUND'
+import json,pathlib,sys
+p=pathlib.Path(sys.argv[1]);x=json.load(open(p/"roundtrip.json"));assert x["importedBlobs"]==4 and x["diffIdsVerified"] and x["whiteoutsApplied"]==1
+root=pathlib.Path(x["directory"]);assert (root/"etc/new").read_bytes()==b"new" and not (root/"etc/old").exists()
+PYROUND
+"$gc" image audit --store "$work/second-store" >/dev/null
+echo OFFLINE_LAYOUT_ROUNDTRIP_PASS
