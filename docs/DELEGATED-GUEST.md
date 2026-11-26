@@ -37,3 +37,7 @@ bash scripts/delegated-guest-smoke.sh --prepare-only
 bash scripts/delegated-guest-smoke.sh --execute
 bash scripts/prepared-bundle-smoke.sh --execute --whiteouts --delegated-guest
 ```
+
+### Live read-only delegated evidence
+
+Use gcontainers delegated-observe runc ID ABS_BUNDLE to compare a separately reviewed bundle's subordinate mapping and limits with actual running process /proc status under the cooperative ID lock. Verify all four host UID/GID values, nested PID1, zero capability sets, NNP, seccomp filter and configured cgroup limits. Repeat runtime state and process status before reporting. No PIDs or mapping numbers emitted, no mutation, no proof that the specified bundle owns the workload or that health/namespace containment is certified.

@@ -63,6 +63,8 @@ func run(args []string, out io.Writer) error {
 		return delegatedSnapshot(args[1:], out)
 	case "snapshot":
 		return bundleSnapshot(args[1:], out)
+	case "delegated-observe":
+		return delegatedObserve(args[1:], out)
 	case "preflight-delegated":
 		return delegatedPreflight(args[1:], out)
 	case "preflight":
@@ -281,6 +283,7 @@ Usage:
   gcontainers stack preflight OLD_STACK_JSON NEW_STACK_JSON --expected-current-sha256 sha256:HEX --cpu-milli N --memory-mib N --max-instances N
   gcontainers stack capacity NATIVE_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
   gcontainers validate BUNDLE_DIRECTORY
+  gcontainers delegated-observe runc ID ABS_BUNDLE
   gcontainers preflight-delegated ABS_BUNDLE
   gcontainers preflight BUNDLE_DIRECTORY  # read-only policy + guest layout diagnostics; no runtime
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
