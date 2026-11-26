@@ -86,9 +86,12 @@ func copyPayload(ctx context.Context, src, dst *os.Root) (BackupReport, error) {
 	if e != nil {
 		return report, e
 	}
-	dm, e := rootMount(dst)
-	if e != nil {
-		return report, e
+	var dm uint64
+	if dst != nil {
+		dm, e = rootMount(dst)
+		if e != nil {
+			return report, e
+		}
 	}
 	h := sha256.New()
 	entries := 0
@@ -106,7 +109,7 @@ func copyPayload(ctx context.Context, src, dst *os.Root) (BackupReport, error) {
 			return errors.New("backup entry bound exceeded")
 		}
 		if info.IsDir() {
-			if rel != "." {
+			if dst != nil && rel != "." {
 				if e = dst.Mkdir(rel, 0700); e != nil {
 					return e
 				}
@@ -142,6 +145,9 @@ func copyPayload(ctx context.Context, src, dst *os.Root) (BackupReport, error) {
 			if e != nil || !samePayload(info, after) {
 				return errors.New("volume directory changed during copy")
 			}
+			if dst == nil {
+				return nil
+			}
 			d, e := dst.Open(rel)
 			if e != nil {
 				return e
@@ -165,23 +171,31 @@ func copyPayload(ctx context.Context, src, dst *os.Root) (BackupReport, error) {
 		if e != nil || m != sm {
 			return errors.New("volume source mount boundary crossed")
 		}
-		out, e := dst.OpenFile(rel, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
-		if e != nil {
-			return e
-		}
-		defer out.Close()
-		m, e = mountIdentity(out)
-		if e != nil || m != dm {
-			return errors.New("volume destination mount boundary crossed")
+		var target io.Writer = h
+		var out *os.File
+		if dst != nil {
+			out, e = dst.OpenFile(rel, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
+			if e != nil {
+				return e
+			}
+			defer out.Close()
+			m, e = mountIdentity(out)
+			if e != nil || m != dm {
+				return errors.New("volume destination mount boundary crossed")
+			}
+			target = io.MultiWriter(out, h)
 		}
 		fmt.Fprintf(h, "f:%d:%s:600:%d\n", len(rel), rel, info.Size())
-		n, e := io.CopyN(io.MultiWriter(out, h), in, info.Size())
+		n, e := io.CopyN(target, in, info.Size())
 		if e != nil || n != info.Size() {
 			return errors.New("volume file changed or truncated")
 		}
-		if e = out.Sync(); e != nil {
-			return e
+		if out != nil {
+			if e = out.Sync(); e != nil {
+				return e
+			}
 		}
+
 		after, e := in.Stat()
 		if e != nil || !samePayload(info, after) {
 			return errors.New("volume file changed during copy")
