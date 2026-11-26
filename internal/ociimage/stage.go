@@ -10,6 +10,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
+	"strings"
 	"syscall"
 )
 
@@ -186,7 +188,24 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 		return report, errors.New("staging identity changed before completion")
 	}
 	// Sync directory entries bottom-up before reporting the tree.
+	names := make([]string, 0, len(dirs))
 	for n := range dirs {
+		names = append(names, n)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if names[i] == "." {
+			return false
+		}
+		if names[j] == "." {
+			return true
+		}
+		di, dj := strings.Count(names[i], "/"), strings.Count(names[j], "/")
+		if di != dj {
+			return di > dj
+		}
+		return names[i] < names[j]
+	})
+	for _, n := range names {
 		f, e := root.Open(n)
 		if e != nil {
 			return report, e
