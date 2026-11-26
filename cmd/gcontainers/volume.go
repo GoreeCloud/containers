@@ -10,9 +10,22 @@ import (
 )
 
 func volumeCommand(args []string, out io.Writer) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	switch {
+	case len(args) == 5 && args[0] == "backup" && args[4] == "--experimental":
+		r, e := volume.Backup(ctx, args[1], args[2], args[3])
+		if e != nil {
+			return e
+		}
+		return json.NewEncoder(out).Encode(r)
+	case len(args) == 6 && args[0] == "restore" && args[5] == "--experimental":
+		r, e := volume.Restore(ctx, args[1], args[2], args[3], args[4])
+		if e != nil {
+			return e
+		}
+		return json.NewEncoder(out).Encode(r)
+
 	case len(args) == 3 && args[0] == "inspect":
 		r, e := volume.Inspect(ctx, args[1], args[2])
 		if e != nil {

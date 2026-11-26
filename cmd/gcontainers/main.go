@@ -224,6 +224,8 @@ Usage:
   gcontainers image pull-stage EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE PRIVATE_PARENT --experimental
   gcontainers image assemble-manifest EXISTING_STORE SHA256 SIZE PRIVATE_PARENT --experimental
   gcontainers image assemble PRIVATE_PARENT (ABS_FILE tar|tar+gzip SHA256 SIZE){1,8} --experimental
+  gcontainers volume backup PRIVATE_STORE ID PRIVATE_BACKUP_PARENT --experimental
+  gcontainers volume restore PRIVATE_STORE NEW_ID BACKUP_DIR SHA256 --experimental
   gcontainers volume create PRIVATE_STORE ID --experimental
   gcontainers volume inspect PRIVATE_STORE ID
   gcontainers volume count PRIVATE_STORE
