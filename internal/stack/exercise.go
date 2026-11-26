@@ -43,6 +43,7 @@ type ExerciseReview struct {
 	DeploymentAuthorized bool   `json:"deploymentAuthorized"`
 }
 type ExerciseReport struct {
+	PrelaunchSHA256 string `json:"prelaunchSHA256,omitempty"`
 	ExerciseReview
 	Persistent                   bool   `json:"persistent,omitempty"`
 	ReceiptSHA256                string `json:"receiptSHA256,omitempty"`
@@ -542,6 +543,20 @@ func runExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 	if e != nil {
 		return report, e
 	}
+	if persistent {
+		stateInfo, err := privateExerciseDir(stateRoot)
+		if err != nil {
+			return report, err
+		}
+		raw, err := json.Marshal(prelaunchRecord{SessionIdentity: prelaunchFileIdentity(identity), RuntimeIdentity: prelaunchFileIdentity(stateInfo), MappingIdentity: prelaunchFileIdentity(mapping.identity), Version: 1, Session: dir, PlanSHA256: p.PlanSHA256, AdmissionSHA256: pin, MappingStore: mappingStore})
+		if err != nil {
+			return report, err
+		}
+		if err = writePrelaunchRecord(root, "prelaunch.json", raw); err != nil {
+			return report, err
+		}
+		report.PrelaunchSHA256 = digestBytes(raw)
+	}
 	input := map[string]ExerciseInput{}
 	for _, i := range a.Instances {
 		input[i.ID] = i
@@ -659,6 +674,10 @@ func runExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 	}
 	if persistent {
 		// Reserve durable ownership BEFORE mutations; all failures retain it.
+		if e = writePrelaunchRecord(root, "launch-intent", []byte(report.PrelaunchSHA256+"\n")); e != nil {
+			return report, e
+		}
+
 		if e = startWaves(ctx, isolatedRuntime{rt: rt, ids: ids, dirs: dirs}, p, dirs, record, &report); e != nil {
 			return report, e
 		}

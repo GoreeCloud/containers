@@ -2,7 +2,7 @@
 # Explicit first-party synthetic image, never production; no host allocation edits.
 set -euo pipefail
 umask 077
-[[ ( "$#" == 1 || ( "$#" == 2 && ( "$2" == --persistent || "$2" == --persistent-soak || "$2" == --natural-exit || "$2" == --interrupted-stop ) ) ) && "$1" == --execute && "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
+[[ ( "$#" == 1 || ( "$#" == 2 && ( "$2" == --persistent || "$2" == --persistent-soak || "$2" == --natural-exit || "$2" == --interrupted-stop || "$2" == --prelaunch-failure ) ) ) && "$1" == --execute && "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
 cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
 printf '%s  %s\n' 50dcc0b257d724fe07f3852c2dda52340223f038227c7572644eec870741223e /usr/local/bin/runc | sha256sum -c -
 prepare="$(GC_SMOKE_RESOURCES=1 bash scripts/oci-smoke.sh --prepare-only)"
@@ -59,6 +59,35 @@ pin="$(cat "$workspace/admission.pin")"
 "$gc" stack review-exercise "$workspace/stack.json" "$workspace/admission.json" "$pin" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["instances"]==3 and r["waves"]==2 and r["readOnly"] and not r["deploymentAuthorized"]'
 if "$gc" stack exercise "$workspace/stack.json" "$workspace/admission.json" "sha256:$(printf '%064d' 0)" "$workspace/store" "$workspace/sessions" --experimental;then exit 1;fi
 test -z "$(find "$workspace/sessions" -mindepth 1 -maxdepth 1 -print -quit)"
+if [[ "${2:-}" == --prelaunch-failure ]];then
+ # Induce a genuine pinned configuration preparation failure, before launch.
+ cp "$workspace/config-0.json" "$workspace/config-0.saved"
+ printf '\n' >> "$workspace/config-0.json"
+ if "$gc" stack start-local "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" "$workspace/leases" --experimental > "$workspace/failed.json";then exit 1;fi
+ mapfile -t failed < <(python3 - "$workspace/failed.json" <<'PYFAIL'
+import json,sys
+r=json.load(open(sys.argv[1]));assert r["persistent"] and r["recoveryReviewRequired"] and r["completedWaves"]==0
+print(r["sessionDirectory"]);print(r["prelaunchSHA256"])
+PYFAIL
+ )
+ session="${failed[0]}";prepin="${failed[1]}"
+ test -f "$workspace/sessions/active-session"
+ if "$gc" stack cancel-prelaunch "$session" "sha256:$(printf '%064d' 0)" --experimental;then exit 1;fi
+ "$gc" stack review-prelaunch "$session" "$prepin" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["readOnly"] and r["emptyInventoryObserved"] and r["noLaunchIntentObserved"] and not r["reservationReleased"]'
+ "$gc" stack cancel-prelaunch "$session" "$prepin" --experimental | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["reservationReleased"] and not r["recoveryReviewRequired"]'
+ test -f "$session/prelaunch-cancelled";test ! -e "$workspace/sessions/active-session"
+ mv "$workspace/config-0.saved" "$workspace/config-0.json"
+ "$gc" stack start-local "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" "$workspace/leases" --experimental > "$workspace/restarted.json"
+ mapfile -t restarted < <(python3 - "$workspace/restarted.json" <<'PYRESTART'
+import json,sys
+r=json.load(open(sys.argv[1]));assert r["allRunningObserved"];print(r["sessionDirectory"]);print(r["receiptSHA256"]);print(r["prelaunchSHA256"])
+PYRESTART
+ )
+ if "$gc" stack cancel-prelaunch "${restarted[0]}" "${restarted[2]}" --experimental;then exit 1;fi
+ "$gc" stack stop-local "${restarted[0]}" "${restarted[1]}" --experimental | python3 -c 'import json,sys;assert json.load(sys.stdin)["cleanupVerified"]'
+ echo PRELAUNCH_FAILURE_RECOVERY_PASS
+ exit 0
+fi
 if [[ "${2:-}" == --persistent || "${2:-}" == --persistent-soak || "${2:-}" == --natural-exit || "${2:-}" == --interrupted-stop ]];then
  "$gc" stack start-local "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" "$workspace/leases" --experimental > "$workspace/local.json"
  mapfile -t values < <(python3 - "$workspace/local.json" <<'PYLOCAL'

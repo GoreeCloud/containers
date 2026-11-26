@@ -44,3 +44,20 @@ bash scripts/stack-exercise-smoke.sh --execute --interrupted-stop
 - [ ] Source rights, verified MIPS authorization, install/rollback and release acceptance for the intended Beta scope.
 
 Stable also requires isolated VPS Mesh canary, production rollback and full acceptance. Beta is not accepted until outstanding gates are validated. Do not create a Beta release tag solely from this checklist or CI.
+
+### Explicit prelaunch failure recovery
+
+New persistent sessions write a private versioned prelaunch record before image preparation and a durable launch-intent marker before the first runtime mutation. Retain the prelaunchSHA256 from the start report independently. For a failed preparation with the record available:
+
+```sh
+gcontainers stack review-prelaunch SESSION PRELAUNCH_SHA
+gcontainers stack cancel-prelaunch SESSION PRELAUNCH_SHA --experimental
+```
+
+Review requires the pinned record, matching session/runtime/mapping-store directory identities, an exact pre-mutation event log prefix, absent launch/stop/cleanup records, and two empty inventory observations under cooperating session and mapping-store locks. Cancellation writes terminal evidence before releasing matching unused reservations. It neither starts nor stops guests, clears journals, removes bundle contents or deletes failed-session records. A missing or malformed reference, earlier unsupported session, launch intent, pending operation, changed directory, or interrupted release requires operator review. This is a narrow prelaunch recovery path, not proof against external same-UID modifications, post-launch crash recovery or a power-loss guarantee. No manual marker removal.
+
+November 26, 2026: actual pinned config mismatch, retained reservation, incorrect cancellation pin refused, read-only review, explicit cancellation, corrected fresh deployment of three nonroot guests, launched-session cancellation refused and verified cleanup passed in the isolated first-party fixture.
+
+```sh
+bash scripts/stack-exercise-smoke.sh --execute --prelaunch-failure
+```
