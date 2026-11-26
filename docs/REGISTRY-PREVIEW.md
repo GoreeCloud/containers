@@ -1,0 +1,5 @@
+# Digest-pinned registry retrieval preview
+
+Use `gcontainers image fetch-blob EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental` only with an explicitly trusted registry origin and independently obtained digest and descriptor size. The existing private content store validates the actual response bytes and exact expected size before publishing; wrong or interrupted downloads cannot become committed blobs. HTTPS certificate verification is enabled. Redirects, proxies, authentication challenges, uploads, tags and compressed transfer encoding are not supported. No authorization headers or credentials are sent. The origin is selected by the local operator, not untrusted application input; this CLI must not be exposed as an unrestricted remote URL-fetching service.
+
+Tests exercise a synthetic local TLS registry, corrupt response bytes, redirects, authorization failures, unexpected encodings, invalid repository/origin and exact descriptor admission. No external production registry was contacted. This is single-blob retrieval only, not full image resolution, signed provenance or execution authorization.
