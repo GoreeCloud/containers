@@ -9,3 +9,7 @@ Runtime root and control-directory identity are checked before and after coopera
 ## Recovery assessment
 
 gcontainers recovery-assess runc|crun ID [--expected-observation-sha256 DIGEST] derives a fixed review category from the existing anchored pending observation. For create/start/kill a matching state is a provisional observed postcondition only, never identity proof. Delete failure is never inferred as absence. The redacted assessment digest supports comparing a prior review with a fresh read; it is not a marker inode, PID or authorization pin. Unresolved operations return nonzero, journal remains unchanged, no runtime mutation or automatic clearing. Matrix tests and repeated marker preservation passed.
+
+### Aggregate recovery assessment
+
+The read-only recovery-summary runc|crun command aggregates at most 16 pending operations using per-ID anchored assessments and two matching inventory reads. Counts provisional postconditions, conflicting states, unavailable runtimes and delete reviews; no identifiers, process IDs, paths or observation digests are emitted. Any recovery incident returns nonzero and no marker is cleared. Non-atomic observation only; no authorization.
