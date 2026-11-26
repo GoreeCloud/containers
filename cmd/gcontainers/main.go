@@ -102,6 +102,9 @@ func run(args []string, out io.Writer) error {
 		_, err = fmt.Fprintln(out, string(payload))
 		return err
 	case "stack":
+		if len(args) >= 2 && args[1] == "instance-plan" {
+			return instancePlan(args[2:], out)
+		}
 		if len(args) == 4 && args[1] == "restart-plan" {
 			spec, err := stack.Load(args[2])
 			if err != nil {
@@ -236,6 +239,7 @@ Usage:
   gcontainers image verify-layer ABS_TAR_FILE tar|tar+gzip sha256:EXPECTED_64_HEX [DESCRIPTOR_BYTES]
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
   gcontainers host inspect
+  gcontainers stack instance-plan SPEC [--expected-plan-sha256 DIGEST]
   gcontainers stack validate NATIVE_STACK_JSON
   gcontainers stack plan NATIVE_STACK_JSON
   gcontainers stack shutdown-plan NATIVE_STACK_JSON  # advisory only
