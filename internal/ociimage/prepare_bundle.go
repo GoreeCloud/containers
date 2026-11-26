@@ -19,6 +19,7 @@ import (
 )
 
 type PreparedBundle struct {
+	WhiteoutsApplied         int    `json:"whiteoutsApplied,omitempty"`
 	Directory                string `json:"directory"`
 	ManifestDigest           string `json:"manifestDigest"`
 	ConfigSHA256             string `json:"configSHA256"`
@@ -72,6 +73,13 @@ func pinnedLocalConfig(ctx context.Context, name, pin string) ([]byte, error) {
 // pinned image bytes and a separately reviewed local config and entrypoint
 // digest. It never interprets image configuration as runtime authorization.
 func (s *Store) PrepareBundle(ctx context.Context, digest string, size int64, config, configPin, entryPin, parent string) (report PreparedBundle, err error) {
+	return s.prepareBundle(ctx, digest, size, config, configPin, entryPin, parent, false)
+}
+func (s *Store) PrepareBundleWithWhiteouts(ctx context.Context, digest string, size int64, config, configPin, entryPin, parent string) (PreparedBundle, error) {
+	return s.prepareBundle(ctx, digest, size, config, configPin, entryPin, parent, true)
+}
+func (s *Store) prepareBundle(ctx context.Context, digest string, size int64, config, configPin, entryPin, parent string, whiteouts bool) (report PreparedBundle, err error) {
+
 	if ctx == nil || s == nil || os.Geteuid() == 0 || !digestPattern.MatchString(entryPin) {
 		return report, errors.New("nonroot pinned preparation required")
 	}
@@ -132,7 +140,7 @@ func (s *Store) PrepareBundle(ctx context.Context, digest string, size int64, co
 		return report, errors.New("prepared directory changed")
 	}
 	dir := filepath.Join(parent, name)
-	staged, e := s.AssembleManifest(ctx, digest, size, dir)
+	staged, e := s.assembleManifest(ctx, digest, size, dir, whiteouts)
 	if e != nil {
 		return report, e
 	}
@@ -263,5 +271,5 @@ func (s *Store) PrepareBundle(ctx context.Context, digest string, size int64, co
 		return report, e
 	}
 	keep = true
-	return PreparedBundle{Directory: dir, ManifestDigest: digest, ConfigSHA256: configPin, EntrypointSHA256: entryPin, DiffIDsVerified: true, LayoutVerified: true}, nil
+	return PreparedBundle{WhiteoutsApplied: staged.WhiteoutsApplied, Directory: dir, ManifestDigest: digest, ConfigSHA256: configPin, EntrypointSHA256: entryPin, DiffIDsVerified: true, LayoutVerified: true}, nil
 }
