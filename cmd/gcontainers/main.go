@@ -119,6 +119,12 @@ func run(args []string, out io.Writer) error {
 		_, err = fmt.Fprintln(out, string(payload))
 		return err
 	case "stack":
+		if len(args) > 1 && args[1] == "review-exercise" {
+			return stackExercise(args[2:], out, true)
+		}
+		if len(args) > 1 && args[1] == "exercise" {
+			return stackExercise(args[2:], out, false)
+		}
 		if len(args) >= 2 && args[1] == "observe" {
 			return stackObserve(args[2:], out)
 		}
@@ -270,6 +276,8 @@ Usage:
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
   gcontainers host helpers
   gcontainers host inspect
+  gcontainers stack review-exercise SPEC ADMISSION ADMISSION_SHA
+  gcontainers stack exercise SPEC ADMISSION ADMISSION_SHA EXISTING_STORE PRIVATE_PARENT --experimental
   gcontainers stack observe SPEC runc|crun --expected-plan-sha256 DIGEST
   gcontainers stack instance-plan SPEC [--expected-plan-sha256 DIGEST]
   gcontainers stack validate NATIVE_STACK_JSON
