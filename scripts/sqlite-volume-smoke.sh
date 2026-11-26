@@ -40,6 +40,9 @@ PY
 mapfile -t result < <(python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["files"]==1 and not r["applicationConsistent"] and not r["mountVerified"];print(r["directory"]);print(r["contentSHA256"])' < "$d/backup.json")
 "$gc" volume verify-backup "${result[0]}" "${result[1]}" >/dev/null
 "$gc" volume restore "$d/store" restored "${result[0]}" "${result[1]}" --experimental > "$d/restore.json"
+"$gc" volume fingerprint "$d/store" source "${result[1]}" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["digestMatches"] and r["readOnly"] and not r["mountVerified"]'
+"$gc" volume fingerprint "$d/store" restored "${result[1]}" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["digestMatches"] and r["files"]==1'
+
 cmp "$d/store/source/state.db" "$d/store/restored/state.db"
 python3 - "$d/store" <<'PY'
 import sqlite3,sys,pathlib
@@ -64,4 +67,7 @@ c.close()
 read("source")
 PY
 "$gc" volume verify-backup "${result[0]}" "${result[1]}" >/dev/null
+if "$gc" volume fingerprint "$d/store" restored "${result[1]}";then exit 1;fi
+"$gc" volume fingerprint "$d/store" source "${result[1]}" >/dev/null
+echo SQLITE_VOLUME_FINGERPRINT_PASS
 echo SQLITE_QUIESCED_BACKUP_RESTORE_PASS
