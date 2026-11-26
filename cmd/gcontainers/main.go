@@ -213,6 +213,15 @@ func usage(w io.Writer) error {
 	_, err := fmt.Fprintln(w, `GoreeCloud Containers 0.1.0-dev — Linux rootless OCI preview
 Usage:
   gcontainers doctor
+  gcontainers snapshot ABS_BUNDLE PRIVATE_PARENT --experimental
+  gcontainers image fetch-blob EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
+  gcontainers image assemble PRIVATE_PARENT (ABS_FILE tar|tar+gzip SHA256 SIZE){1,8} --experimental
+  gcontainers volume create PRIVATE_STORE ID --experimental
+  gcontainers volume inspect PRIVATE_STORE ID
+  gcontainers volume count PRIVATE_STORE
+  gcontainers serve-local ABS_SOCKET --experimental
+  gcontainers local-query ABS_SOCKET health|journal
+  gcontainers recovery-observe runc|crun ID
   gcontainers kernel-probe  # inert rootless namespace check, NOT OCI acceptance
   gcontainers image audit --store ABS_EXISTING_STORE_DIR
   gcontainers image verify OCI_LAYOUT_DIR
@@ -220,7 +229,7 @@ Usage:
   gcontainers image stage-layer ABS_FILE tar|tar+gzip sha256:HEX DESCRIPTOR_BYTES PRIVATE_PARENT --experimental
   gcontainers image verify-layer ABS_TAR_FILE tar|tar+gzip sha256:EXPECTED_64_HEX [DESCRIPTOR_BYTES]
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
-gcontainers host inspect
+  gcontainers host inspect
   gcontainers stack validate NATIVE_STACK_JSON
   gcontainers stack plan NATIVE_STACK_JSON
   gcontainers stack shutdown-plan NATIVE_STACK_JSON  # advisory only
@@ -239,7 +248,7 @@ gcontainers host inspect
   gcontainers oci pending-summary  # privacy-minimized inventory, fails on incidents
   gcontainers oci pending --id NAME    # read-only unresolved intent inspection
 Options for OCI commands: --runtime=crun|runc
-No image pull/unpack, native stack execution, networking, Compose or production deployment is implemented yet.`)
+Restricted previews only. No complete image pull/unpack, attached volumes, native stack execution, networking, Compose or production deployment.`)
 	return err
 }
 
