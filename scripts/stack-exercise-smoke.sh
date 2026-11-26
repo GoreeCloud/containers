@@ -2,7 +2,7 @@
 # Explicit first-party synthetic image, never production; no host allocation edits.
 set -euo pipefail
 umask 077
-[[ ( "$#" == 1 || ( "$#" == 2 && ( "$2" == --persistent || "$2" == --persistent-soak || "$2" == --natural-exit || "$2" == --interrupted-stop || "$2" == --prelaunch-failure ) ) ) && "$1" == --execute && "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
+[[ ( "$#" == 1 || ( "$#" == 2 && ( "$2" == --persistent || "$2" == --persistent-soak || "$2" == --natural-exit || "$2" == --interrupted-stop || "$2" == --prelaunch-failure || "$2" == --terminal-cleanup ) ) ) && "$1" == --execute && "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
 cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
 printf '%s  %s\n' 50dcc0b257d724fe07f3852c2dda52340223f038227c7572644eec870741223e /usr/local/bin/runc | sha256sum -c -
 prepare="$(GC_SMOKE_RESOURCES=1 bash scripts/oci-smoke.sh --prepare-only)"
@@ -88,7 +88,7 @@ PYRESTART
  echo PRELAUNCH_FAILURE_RECOVERY_PASS
  exit 0
 fi
-if [[ "${2:-}" == --persistent || "${2:-}" == --persistent-soak || "${2:-}" == --natural-exit || "${2:-}" == --interrupted-stop ]];then
+if [[ "${2:-}" == --persistent || "${2:-}" == --persistent-soak || "${2:-}" == --natural-exit || "${2:-}" == --interrupted-stop || "${2:-}" == --terminal-cleanup ]];then
  "$gc" stack start-local "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" "$workspace/leases" --experimental > "$workspace/local.json"
  mapfile -t values < <(python3 - "$workspace/local.json" <<'PYLOCAL'
 import json,sys
@@ -98,6 +98,36 @@ PYLOCAL
  )
  session="${values[0]}";receipt="${values[1]}"
  "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"] and not r["recoveryReviewRequired"]'
+ if [[ "${2:-}" == --terminal-cleanup ]];then
+  # Simulate only terminal cleanup before reservation release. All guests
+  # are synthetic and explicitly stopped/deleted in receipt reverse order.
+  if "$gc" stack review-cleanup "$session" "$receipt";then exit 1;fi
+  printf '%s\n' "$receipt" > "$session/stop-intent"
+  printf '%s\n' "$receipt" > "$session/cleanup-verified"
+  if "$gc" stack review-cleanup "$session" "$receipt";then exit 1;fi
+  mapfile -t ids < <(python3 - "$session/local-receipt.json" <<'PYTERMINAL'
+import json,sys
+r=json.load(open(sys.argv[1]))
+for w in r["stopWaves"]:
+ for id in w:print(r["bindings"][id]["id"])
+PYTERMINAL
+  )
+  for id in "${ids[@]}";do
+   XDG_RUNTIME_DIR="$session/runtime" "$gc" oci stop --runtime runc --id "$id" --experimental
+   XDG_RUNTIME_DIR="$session/runtime" "$gc" oci delete --runtime runc --id "$id" --experimental
+  done
+  if "$gc" stack review-cleanup "$session" "sha256:$(printf '%064d' 0)";then exit 1;fi
+  "$gc" stack review-cleanup "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["readOnly"] and r["terminalCleanupChecksPassed"] and r["missingProcessAbsent"]==3 and r["recoveryReviewRequired"] and not r["cleanupVerified"]'
+  test -f "$workspace/sessions/active-session"
+  test -n "$(find "$workspace/leases" -name 'lease-*.json' -print -quit)"
+  if "$gc" stack release-cleanup "$session" "$receipt";then exit 1;fi
+  "$gc" stack release-cleanup "$session" "$receipt" --experimental | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["terminalCleanupChecksPassed"] and r["cleanupVerified"] and not r["recoveryReviewRequired"]'
+  test ! -e "$workspace/sessions/active-session"
+  test -z "$(find "$workspace/leases" -name 'lease-*.json' -print -quit)"
+  if "$gc" stack release-cleanup "$session" "$receipt" --experimental;then exit 1;fi
+  echo TERMINAL_CLEANUP_RECOVERY_PASS
+  exit 0
+ fi
  if [[ "${2:-}" == --interrupted-stop ]];then
  # A final-event-only synthetic log must never authorize status or stop.
  cp -- "$session/events.ndjson" "$workspace/events.saved"
