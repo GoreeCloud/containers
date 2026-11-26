@@ -134,3 +134,45 @@ func TestPersistentEventsRequireExactStartup(t *testing.T) {
 		})
 	}
 }
+
+func TestPrivateRecordRejectsSameContentRewrite(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "receipt")
+	if err := os.WriteFile(f, []byte("fixed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	raw, before, err := readPrivateRecord(root, "receipt", 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, same, err := readPrivateRecord(root, "receipt", 64)
+	if err != nil || !samePrivateRecord(before, same) {
+		t.Fatal("unchanged record rejected", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err = os.WriteFile(f, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chtimes(f, before.ModTime(), before.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	_, after, err := readPrivateRecord(root, "receipt", 64)
+	if err != nil || samePrivateRecord(before, after) {
+		t.Fatal("same-content rewrite accepted", err)
+	}
+	if err = os.Rename(f, f+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(f, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, replacement, err := readPrivateRecord(root, "receipt", 64)
+	if err != nil || samePrivateRecord(after, replacement) {
+		t.Fatal("replacement accepted", err)
+	}
+}

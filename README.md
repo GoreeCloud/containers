@@ -177,4 +177,4 @@ See [Stack exercise](docs/STACK-EXERCISE.md) for the restricted, digest-pinned n
 
 ### Persistent local Stack preview
 
-The [persistent local Stack preview](docs/LOCAL-STACK-PREVIEW.md) adds explicit start/status/stop with pinned session receipts, process-generation and metadata binding, one active reservation per dedicated parent, cross-parent shared subordinate identity reservations, explicit interrupted-stop recovery, exact startup-event sequence validation, reverse cleanup and fresh generation reuse. Beta qualification remains incomplete.
+The [persistent local Stack preview](docs/LOCAL-STACK-PREVIEW.md) adds explicit start/status/stop with pinned session receipts, process-generation and metadata binding, one active reservation per dedicated parent, cross-parent shared subordinate identity reservations, explicit interrupted-stop recovery, exact startup-event sequence validation, private evidence inode/change-time checks, reverse cleanup and fresh generation reuse. Beta qualification remains incomplete.
