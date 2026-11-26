@@ -53,7 +53,7 @@ func appendPersistentFinalEvent(root *os.Root, prefix []byte, identity os.FileIn
 		return err
 	}
 	current, info, err := readPrivateRecord(root, "events.ndjson", 64<<10)
-	if err != nil || !os.SameFile(identity, info) || !bytes.Equal(current, prefix) {
+	if err != nil || !samePrivateRecord(identity, info) || !bytes.Equal(current, prefix) {
 		return errors.New("startup log changed before finalization")
 	}
 	f, err := root.OpenFile("events.ndjson", os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW, 0600)
@@ -61,7 +61,7 @@ func appendPersistentFinalEvent(root *os.Root, prefix []byte, identity os.FileIn
 		return err
 	}
 	opened, err := f.Stat()
-	if err != nil || !privateRecord(opened, 0600) || !os.SameFile(info, opened) || verifyStackInputIdentity(root, f, info, "events.ndjson") != nil {
+	if err != nil || !samePrivateRecord(info, opened) || verifyStackInputIdentity(root, f, info, "events.ndjson") != nil {
 		f.Close()
 		return errors.New("startup log identity changed before append")
 	}
