@@ -9,7 +9,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"syscall"
+	"time"
 )
+
+const MaxVolumes = 1024
 
 var validID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
@@ -64,6 +67,21 @@ func Create(ctx context.Context, parent, id string) (Report, error) {
 		return Report{}, e
 	}
 	defer r.Close()
+	guard, e := lockStore(ctx, r, syscall.LOCK_EX)
+	if e != nil {
+		return Report{}, e
+	}
+	defer guard.Close()
+	n, e := countLocked(ctx, r)
+	if e != nil {
+		return Report{}, e
+	}
+	if n >= MaxVolumes {
+		return Report{}, errors.New("volume count capacity reached")
+	}
+	if e = ctx.Err(); e != nil {
+		return Report{}, e
+	}
 	if e = r.Mkdir(id, 0700); e != nil {
 		return Report{}, e
 	}
@@ -93,6 +111,11 @@ func Inspect(ctx context.Context, parent, id string) (Report, error) {
 		return Report{}, e
 	}
 	defer r.Close()
+	guard, e := lockStore(ctx, r, syscall.LOCK_SH)
+	if e != nil {
+		return Report{}, e
+	}
+	defer guard.Close()
 	info, e := r.Lstat(id)
 	if os.IsNotExist(e) {
 		return Report{ID: id}, nil
@@ -113,16 +136,24 @@ func Count(ctx context.Context, parent string) (int, error) {
 		return 0, e
 	}
 	defer r.Close()
+	guard, e := lockStore(ctx, r, syscall.LOCK_SH)
+	if e != nil {
+		return 0, e
+	}
+	defer guard.Close()
+	return countLocked(ctx, r)
+}
+func countLocked(ctx context.Context, r *os.Root) (int, error) {
 	f, e := r.Open(".")
 	if e != nil {
 		return 0, e
 	}
 	defer f.Close()
-	names, e := f.Readdirnames(1025)
+	names, e := f.Readdirnames(MaxVolumes + 1)
 	if e != nil && e != io.EOF {
 		return 0, e
 	}
-	if len(names) > 1024 {
+	if len(names) > MaxVolumes {
 		return 0, errors.New("volume inventory exceeds bound")
 	}
 	for _, name := range names {
@@ -135,4 +166,40 @@ func Count(ctx context.Context, parent string) (int, error) {
 		}
 	}
 	return len(names), nil
+}
+
+// Lock the actual anchored store directory rather than introducing a lock
+// filename into volume inventory. Cooperating processes share this bound;
+// uncooperative direct filesystem writers remain outside the guarantee.
+func lockStore(ctx context.Context, r *os.Root, mode int) (*os.File, error) {
+	f, e := r.Open(".")
+	if e != nil {
+		return nil, e
+	}
+	for {
+		if e = ctx.Err(); e != nil {
+			f.Close()
+			return nil, e
+		}
+		e = syscall.Flock(int(f.Fd()), mode|syscall.LOCK_NB)
+		if e == nil {
+			if e = ctx.Err(); e != nil {
+				f.Close()
+				return nil, e
+			}
+			return f, nil
+		}
+		if e != syscall.EWOULDBLOCK && e != syscall.EAGAIN && e != syscall.EINTR {
+			f.Close()
+			return nil, e
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			f.Close()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }

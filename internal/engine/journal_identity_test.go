@@ -43,3 +43,32 @@ func TestJournalRetainsReplacementAndCancellation(t *testing.T) {
 		}
 	})
 }
+
+func TestJournalRefusesInPlaceRewriteWithRestoredMtime(t *testing.T) {
+	root := journalFixture(t)
+	name := filepath.Join(root, "journal", "worker.pending")
+	_, err := RunJournaledMutation(context.Background(), root, "worker", "start", func() ([]byte, error) {
+		before, e := os.Stat(name)
+		if e != nil {
+			t.Fatal(e)
+		}
+		raw, e := os.ReadFile(name)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = os.WriteFile(name, raw, 0600); e != nil {
+			t.Fatal(e)
+		}
+		if e = os.Chtimes(name, before.ModTime(), before.ModTime()); e != nil {
+			t.Fatal(e)
+		}
+		return []byte("ok"), nil
+	})
+	if !errors.Is(err, ErrUnresolvedMutation) {
+		t.Fatal("rewritten marker cleared", err)
+	}
+	report, e := ReadPendingMutation(context.Background(), root, "worker")
+	if e != nil || !report.Pending {
+		t.Fatal(report, e)
+	}
+}
