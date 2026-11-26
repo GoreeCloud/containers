@@ -288,6 +288,7 @@ type LocalSessionReport struct {
 	MissingProcessAbsent          int    `json:"missingProcessAbsent"`
 	CleanupVerified               bool   `json:"cleanupVerified"`
 	RecoveryReviewRequired        bool   `json:"recoveryReviewRequired"`
+	TerminalCleanupChecksPassed   bool   `json:"terminalCleanupChecksPassed"`
 	HealthVerified                bool   `json:"healthVerified"`
 	DeploymentAuthorized          bool   `json:"deploymentAuthorized"`
 }
@@ -350,6 +351,15 @@ func FinalizeLocalStart(ctx context.Context, dir, pin, binary string, apply bool
 	return manageLocal(ctx, dir, pin, binary, localReviewStart)
 }
 
+// RecoverTerminalCleanup handles the narrow crash window after terminal
+// evidence was written but before either cooperating reservation was released.
+func RecoverTerminalCleanup(ctx context.Context, dir, pin, binary string, apply bool) (LocalSessionReport, error) {
+	if apply {
+		return manageLocal(ctx, dir, pin, binary, localReleaseCleanup)
+	}
+	return manageLocal(ctx, dir, pin, binary, localReviewCleanup)
+}
+
 type localSessionAction uint8
 
 const (
@@ -359,14 +369,18 @@ const (
 	localResumeStop
 	localReviewStart
 	localFinalizeStart
+	localReviewCleanup
+	localReleaseCleanup
 )
 
 func manageLocal(ctx context.Context, dir, pin, binary string, action localSessionAction) (LocalSessionReport, error) {
 	stop := action == localStop || action == localResumeStop
-	resume := action == localReviewStop || action == localResumeStop
+	terminal := action == localReviewCleanup || action == localReleaseCleanup
+	applyTerminal := action == localReleaseCleanup
+	resume := action == localReviewStop || action == localResumeStop || terminal
 	finalization := action == localReviewStart || action == localFinalizeStart
 	applyFinalize := action == localFinalizeStart
-	r := LocalSessionReport{ReadOnly: !stop && !applyFinalize, RecoveryReviewRequired: true}
+	r := LocalSessionReport{ReadOnly: !stop && !applyFinalize && !applyTerminal, RecoveryReviewRequired: true}
 	if ctx == nil || os.Geteuid() == 0 || filepath.Base(binary) != "runc" || !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
 		return r, errors.New("private local session required")
 	}
@@ -437,7 +451,14 @@ func manageLocal(ctx context.Context, dir, pin, binary string, action localSessi
 	} else if _, e = root.Lstat("stop-intent"); !os.IsNotExist(e) {
 		return r, errors.New("previous stop intent exists; recovery review required")
 	}
-	if _, e = root.Lstat("cleanup-verified"); !os.IsNotExist(e) {
+	var terminalIdentity os.FileInfo
+	if terminal {
+		record, info, err := readPrivateRecord(root, "cleanup-verified", 128)
+		if err != nil || string(record) != pin+"\n" {
+			return r, errors.New("exact terminal cleanup record required")
+		}
+		terminalIdentity = info
+	} else if _, e = root.Lstat("cleanup-verified"); !os.IsNotExist(e) {
 		return r, errors.New("cleanup record already exists; manual reservation review required")
 	}
 	log, logIdentity, e := readPrivateRecord(root, "events.ndjson", 64<<10)
@@ -477,6 +498,9 @@ func manageLocal(ctx context.Context, dir, pin, binary string, action localSessi
 		return r, e
 	}
 	r.Pending = before.RecoveryRequired
+	if terminal && (before.RecoveryRequired || len(before.Entries) != 0) {
+		return r, errors.New("terminal cleanup requires empty runtime inventory")
+	}
 	if before.RecoveryRequired || len(before.Entries) > len(rec.Bindings) || (!resume && len(before.Entries) != len(rec.Bindings)) {
 		return r, errors.New("local inventory uncertain or incomplete")
 	}
@@ -563,6 +587,68 @@ func manageLocal(ctx context.Context, dir, pin, binary string, action localSessi
 		return r, e
 	}
 	r.BindingsObserved = true
+	if terminal {
+		verifyTerminal := func() error {
+			if err := check(); err != nil {
+				return err
+			}
+			if err := checkMapping(mapping, rec.Mapping, dir); err != nil {
+				return err
+			}
+			if err := checkReceipt(); err != nil {
+				return err
+			}
+			if err := checkIntent(); err != nil {
+				return err
+			}
+			if err := checkLog(); err != nil {
+				return err
+			}
+			b, info, err := readPrivateRecord(root, "cleanup-verified", 128)
+			if err != nil || !samePrivateRecord(terminalIdentity, info) || string(b) != pin+"\n" {
+				return errors.New("terminal record changed")
+			}
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			return nil
+		}
+		if r.MissingProcessAbsent != r.Expected {
+			return r, errors.New("all original processes must be absent")
+		}
+		if e = verifyTerminal(); e != nil {
+			return r, e
+		}
+		r.TerminalCleanupChecksPassed = true
+		if !applyTerminal {
+			return r, nil
+		}
+		// No stop, delete, journal clearing, or runtime recreation.
+		for _, b := range rec.Bindings {
+			if e = rt.CheckAbsentBinding(ctx, b); e != nil {
+				return r, e
+			}
+		}
+		again, err := rt.Inventory(ctx)
+		if err != nil || again.RecoveryRequired || len(again.Entries) != 0 {
+			return r, errors.New("terminal runtime inventory changed")
+		}
+		if e = verifyTerminal(); e != nil {
+			return r, e
+		}
+		if e = syncDirectory(root); e != nil {
+			return r, e
+		}
+		if e = releaseMappings(mapping, rec.Mapping, dir); e != nil {
+			return r, e
+		}
+		if e = lease.release(session); e != nil {
+			return r, e
+		}
+		r.CleanupVerified = true
+		r.RecoveryReviewRequired = false
+		return r, nil
+	}
 	if finalization {
 		if r.Running != r.Expected {
 			return r, errors.New("all original live bindings required")
