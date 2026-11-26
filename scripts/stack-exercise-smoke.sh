@@ -60,7 +60,7 @@ test -z "$(find "$workspace/sessions" -mindepth 1 -maxdepth 1 -print -quit)"
 "$gc" stack exercise "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" --experimental > "$workspace/exercise.json"
 python3 - "$workspace" <<'PY'
 import json,pathlib,sys
-p=pathlib.Path(sys.argv[1]);r=json.load(open(p/"exercise.json"));assert r["prepared"]==3 and r["completedWaves"]==2 and r["completedStopWaves"]==2 and r["allRunningObserved"] and r["cleanupVerified"] and not r["recoveryReviewRequired"] and not r["deploymentAuthorized"]
+p=pathlib.Path(sys.argv[1]);r=json.load(open(p/"exercise.json"));assert r["prepared"]==3 and r["completedWaves"]==2 and r["completedStopWaves"]==2 and r["allRunningObserved"] and r["allDelegatedEvidenceObserved"] and r["cleanupVerified"] and not r["recoveryReviewRequired"] and not r["deploymentAuthorized"]
 d=pathlib.Path(r["sessionDirectory"]);assert d.parent==p/"sessions"
 receipt=json.load(open(d/"receipt.json"));ids=receipt["runtimeIDs"];assert len(set(ids.values()))==3 and all(k!=v for k,v in ids.items())
 events=[json.loads(line) for line in (d/"events.ndjson").read_text().splitlines()]

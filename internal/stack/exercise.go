@@ -44,15 +44,16 @@ type ExerciseReview struct {
 }
 type ExerciseReport struct {
 	ExerciseReview
-	SessionDirectory          string `json:"sessionDirectory,omitempty"`
-	Prepared                  int    `json:"prepared"`
-	CompletedWaves            int    `json:"completedWaves"`
-	CompletedStopWaves        int    `json:"completedStopWaves"`
-	AllRunningObserved        bool   `json:"allRunningObserved"`
-	CleanupVerified           bool   `json:"cleanupVerified"`
-	RecoveryReviewRequired    bool   `json:"recoveryReviewRequired"`
-	HealthVerified            bool   `json:"healthVerified"`
-	MIPSAuthorizationVerified bool   `json:"mipsAuthorizationVerified"`
+	SessionDirectory             string `json:"sessionDirectory,omitempty"`
+	Prepared                     int    `json:"prepared"`
+	CompletedWaves               int    `json:"completedWaves"`
+	CompletedStopWaves           int    `json:"completedStopWaves"`
+	AllDelegatedEvidenceObserved bool   `json:"allDelegatedEvidenceObserved"`
+	AllRunningObserved           bool   `json:"allRunningObserved"`
+	CleanupVerified              bool   `json:"cleanupVerified"`
+	RecoveryReviewRequired       bool   `json:"recoveryReviewRequired"`
+	HealthVerified               bool   `json:"healthVerified"`
+	MIPSAuthorizationVerified    bool   `json:"mipsAuthorizationVerified"`
 }
 
 func digestBytes(b []byte) string { return fmt.Sprintf("sha256:%x", sha256.Sum256(b)) }
@@ -186,8 +187,9 @@ func parallelInstances(ctx context.Context, ids []string, op func(context.Contex
 // A private runtime root alone does not namespace cgroup names. Use
 // per-session random runtime IDs, not deterministic plan IDs, for mutations.
 type isolatedRuntime struct {
-	rt  *engine.Engine
-	ids map[string]string
+	rt   *engine.Engine
+	ids  map[string]string
+	dirs map[string]string
 }
 
 func (r isolatedRuntime) CreateDelegated(ctx context.Context, id, dir string) error {
@@ -208,6 +210,12 @@ func (r isolatedRuntime) State(ctx context.Context, id string) ([]byte, error) {
 	s, e := engine.DecodeRuntimeState(raw, r.ids[id])
 	if e != nil {
 		return nil, e
+	}
+	if s.Status == "running" {
+		evidence, err := r.rt.ObserveDelegated(ctx, r.ids[id], r.dirs[id])
+		if err != nil || !evidence.RunningObserved || !evidence.SubordinateIdentityObserved || !evidence.PIDNamespaceObserved || !evidence.ZeroCapabilitiesObserved || !evidence.NoNewPrivilegesObserved || !evidence.SeccompFilterObserved || !evidence.ResourceLimitsObserved {
+			return nil, errors.New("live delegated evidence not verified")
+		}
 	}
 	s.ID = id
 	return json.Marshal(s)
@@ -546,7 +554,23 @@ func RunExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 	if e = errors.Join(base.Sync(), base.Close()); e != nil {
 		return report, e
 	}
-	if e = executeWaves(ctx, isolatedRuntime{rt: rt, ids: ids}, p, dirs, record, &report); e != nil {
+	parentHandle, e := os.OpenRoot(parent)
+	if e != nil {
+		return report, e
+	}
+	parentFile, e := parentHandle.Open(".")
+	if e != nil {
+		parentHandle.Close()
+		return report, e
+	}
+	e = errors.Join(parentFile.Sync(), parentFile.Close(), parentHandle.Close())
+	if e != nil {
+		return report, e
+	}
+	if e = check(); e != nil {
+		return report, e
+	}
+	if e = executeWaves(ctx, isolatedRuntime{rt: rt, ids: ids, dirs: dirs}, p, dirs, record, &report); e != nil {
 		return report, e
 	}
 	inv, e = rt.Inventory(ctx)
@@ -556,6 +580,7 @@ func RunExercise(ctx context.Context, s Spec, admissionPath, pin, storePath, par
 	if e = record(exerciseEvent{Phase: "cleanup-verified"}); e != nil {
 		return report, e
 	}
+	report.AllDelegatedEvidenceObserved = true
 	report.CleanupVerified = true
 	report.RecoveryReviewRequired = false
 	return report, nil
