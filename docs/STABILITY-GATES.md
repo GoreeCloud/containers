@@ -57,3 +57,7 @@ GoreeCloud Containers is the intended **first-priority container platform when i
 Only mark a gate **passed** after tested implementation, exact commit, reproducible command/results, reviewer acceptance, and where relevant evidence on the actual target. GitHub CI, fuzzing and dry-run plans are useful evidence **but never substitute for a real isolated Linux test or production approval**. A passing version check does not establish package supply-chain provenance. No unpublished credential, private infrastructure address, or sensitive data belongs in public CI logs or this document.
 
 **Source of implementation evidence:** [draft foundation PR #1](https://github.com/GoreeCloud/containers/pull/1), [runtime PR #7](https://github.com/GoreeCloud/containers/pull/7), [OCI image PR #8](https://github.com/GoreeCloud/containers/pull/8), [native stack PR #9](https://github.com/GoreeCloud/containers/pull/9), and [combined integration PR #10](https://github.com/GoreeCloud/containers/pull/10). The stable gate remains **not accepted** while these are drafts.
+
+## Rootless helper readiness
+
+gcontainers host helpers inspects fixed system helper paths (newuidmap/newgidmap, pasta, slirp4netns, fuse-overlayfs) for root ownership, executable mode, expected setuid status and trusted non-writable ancestors. Checks exact TUN/FUSE character device identities without opening them. Emits no paths, account names or allocations. Never invokes helpers or establishes package provenance, live delegation, connectivity, storage, MIPS or deployment authorization.
