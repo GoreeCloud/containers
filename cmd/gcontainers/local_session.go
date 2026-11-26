@@ -33,6 +33,12 @@ func localSession(action string, args []string, out io.Writer) error {
 			return err
 		}
 		report, e = stack.StartLocal(ctx, s, args[1], args[2], args[3], args[4], bin, args[5])
+	case "review-prelaunch", "cancel-prelaunch":
+		apply := action == "cancel-prelaunch"
+		if (!apply && len(args) != 2) || (apply && (len(args) != 3 || args[2] != "--experimental")) {
+			return errors.New("usage: stack review-prelaunch SESSION PRELAUNCH_SHA | stack cancel-prelaunch SESSION PRELAUNCH_SHA --experimental")
+		}
+		report, e = stack.RecoverPrelaunch(ctx, args[0], args[1], bin, apply)
 	case "status-local", "stop-local", "resume-stop":
 		stop := action != "status-local"
 		if !stop && len(args) != 2 || stop && (len(args) != 3 || args[2] != "--experimental") {
