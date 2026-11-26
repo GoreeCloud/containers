@@ -4,7 +4,7 @@
 
 GoreeCloud Containers is being built as the eventual default containerization solution for the GoreeCloud ecosystem, with a design goal of permanently replacing Docker and Podman as the default management engines after independently verified stability. Docker, Docker Compose, and Podman remain optional, second-priority compatibility paths; none is required by the intended stable GoreeCloud Containers engine.
 
-> **Status: 0.1.0-dev / experimental foundation. Not production-ready.** No Docker/Podman replacement, image pull/build, daemon, Compose execution, networking, volumes, UI, remote control, or cluster orchestration is claimed. Do not migrate production containers.
+> **Status: 0.1.0-dev / experimental foundation. Not production-ready.** A restricted rootless OCI lifecycle, private content store, digest-pinned single-blob HTTPS retrieval, inert ordered layer assembly, private volume directories and local read-only API are implemented. Full image pull/build, volume mounting, networking, daemon, Compose execution, GUI, remote control and cluster orchestration are not implemented. Do not migrate production containers.
 
 ## Implemented in this development branch
 
@@ -16,7 +16,7 @@ GoreeCloud Containers is being built as the eventual default containerization so
 - A journaled OCI `create` now performs an immediate strictly decoded `state` readback: a low-level runtime exit status 0 with a guest already `stopped` is **not** a successful container creation. In that case the pending journal is retained for operator recovery; passing this check does not guarantee the guest will remain alive or that subsequent `start` and confinement have been accepted.
 - Additional preflight: the preview requires the exact invoking nonroot host UID/GID mappings and an approved root-owned system-installed low-level OCI runtime executable. No subordinate UID/GID ranges yet. Experimental execution now refuses external crun below 1.31 or runc below 1.5.3, and ambiguous versions; this is a conservative 2026-11-16 preflight, not a security certification.
 - Read-only doctor reports crun_admission_status and runc_admission_status as not_installed, untrusted_executable, runtime_version_or_probe_rejected, or preview_preflight_passed. These are privacy-minimized preflight reasons, not deployment authorization; every real OCI operation still repeats independent runtime checks.
-- Private local SHA-256 content-addressed blob store with bounded, directory-handle-anchored, atomic, deduplicated imports (requires explicit experimental confirmation; **no image unpack, registry client or container execution**).
+- Private local SHA-256 content-addressed blob store with bounded, directory-handle-anchored, atomic, deduplicated imports (requires explicit experimental confirmation; **blob import alone does not authorize execution**).
 - Read-only OCI image-layout integrity verification: referenced SHA-256 blobs, descriptor sizes, metadata limits, no downloads or extraction. Supported OCI media types are intentionally restricted; **this is not an image store or container image engine**.
 - Native GoreeCloud stack JSON preview: strict, versioned schema validation and dependency-ordered, parallel-stage **dry-run plans only**, with a deterministic SHA-256 specification fingerprint (an audit identifier, not an approval). No Docker Compose engine is required; no stack apply or service deployment exists yet.
 
@@ -24,7 +24,7 @@ GoreeCloud Containers is being built as the eventual default containerization so
 - Further development safeguards: cooperating cross-process runtime locks and private incident-journal census; read-only full-store SHA-256 audit with advisory aggregate import quota; descriptor-anchored stack declarations and offline old-plus-new resource budget checks. None replaces isolation, signed provenance or production authorization.
 - Standard-library-only Go code, initial unit tests and Linux CI.
 
-The execution adapter is **not** yet independently security audited or exercised against real kernel isolation in this change. OCI runtimes remain required for execution; this is not a from-scratch kernel runtime. Validation reduces obvious hazards, but cannot certify an arbitrary OCI bundle as safe.
+The execution adapter has passed narrow first-party isolated Linux OCI lifecycle tests, including all six namespace comparisons and kernel cgroup readback, but has not passed a comprehensive independent security audit or Stable acceptance. OCI runtimes remain required for execution; this is not a from-scratch kernel runtime. Validation reduces obvious hazards, but cannot certify an arbitrary OCI bundle as safe.
 
 ## Build and try the read-only commands
 
@@ -77,20 +77,20 @@ source_sha="$(./gcontainers stack plan examples/native-stack.json | sed -nE 's/^
 ./gcontainers preflight /path/to/oci-bundle
 ```
 
-For experimental `oci create`, the preview checks that `rootfs/dev` and `rootfs/proc` are real directories (not missing or symlinked) **before** invoking `runc`/`crun` or writing the mutation journal. An optional, **experimental** rootless `/dev` profile permits only a private 64 MiB `tmpfs` with exact `nosuid,noexec,nodev,mode=755,size=65536k` options **paired** with a private `/dev/pts` `devpts` mount with exact `nosuid,noexec,newinstance,ptmxmode=0666,mode=0620` options. That profile additionally requires a real nonsymlink `rootfs/dev/pts` directory and continues to reject host bind mounts, custom devices and privileged syscalls. An exact mount allowlist is not proof of device-node or process isolation; **real rootless OCI execution using these mounts has not yet passed independent acceptance**. Do not use this profile for production workloads.
+For experimental `oci create`, the preview checks that `rootfs/dev` and `rootfs/proc` are real directories (not missing or symlinked) **before** invoking `runc`/`crun` or writing the mutation journal. An optional, **experimental** rootless `/dev` profile permits only a private 64 MiB `tmpfs` with exact `nosuid,noexec,nodev,mode=755,size=65536k` options **paired** with a private `/dev/pts` `devpts` mount with exact `nosuid,noexec,newinstance,ptmxmode=0666,mode=0620` options. That profile additionally requires a real nonsymlink `rootfs/dev/pts` directory and continues to reject host bind mounts, custom devices and privileged syscalls. An exact mount allowlist is not proof of device-node or process isolation; **a first-party isolated real rootless OCI fixture passed; broader acceptance is incomplete**. Do not use this profile for production workloads.
 
 Running an experimental rootless bundle also requires a maintained `crun` or `runc` installation, a private `XDG_RUNTIME_DIR`, a suitable Linux kernel, correctly mapped UID/GID ranges, rootfs, and an OCI spec satisfying the preview policy. Execution is not recommended on production hosts.
 
 ```sh
-./gcontainers oci create --id example --bundle /path/to/oci-bundle --experimental
-./gcontainers oci start --id example --experimental
-./gcontainers oci state --id example
+./gcontainers oci create --runtime runc --id example --bundle /path/to/oci-bundle --experimental
+./gcontainers oci start --runtime runc --id example --experimental
+./gcontainers oci state --runtime runc --id example
 # Read-only pending-operation status (no patched OCI runtime required):
 ./gcontainers oci pending --id example
 # Read-only private journal incident aggregate; no runtime required:
 ./gcontainers oci pending-summary
-./gcontainers oci stop --id example --experimental
-./gcontainers oci delete --id example --experimental
+./gcontainers oci stop --runtime runc --id example --experimental
+./gcontainers oci delete --runtime runc --id example --experimental
 ```
 
 ## Architecture, safety, and roadmap
@@ -112,6 +112,15 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - **Wardveil:** container security policy, image scanning, detection and response (future adapter).
 - **GoreeCloud UI:** the sole design authority for any future graphical management client.
 
+## Current experimental capabilities
+
+- [Private bundle snapshots](docs/PRIVATE-SNAPSHOT.md): bounded copy and digest, not immutable or authorized for execution.
+- [Registry blob retrieval](docs/REGISTRY-PREVIEW.md): explicit HTTPS origin and exact descriptor, no authentication, redirects or full image resolution.
+- [Ordered inert layer assembly](docs/ASSEMBLY-PREVIEW.md): up to eight pinned layers; no whiteouts, links, executable permissions or full OCI semantics.
+- [Private volume directories](docs/VOLUME-PREVIEW.md): exclusive creation and aggregate inventory; no mounting, quota, backup or deletion.
+- [Local API](docs/LOCAL-API.md) and [client](docs/LOCAL-CLIENT.md): private same-UID Unix socket, read-only health and journal, no TCP or MIPS identity grant.
+- [Recovery observation](docs/RECOVERY-OBSERVATION.md), [start evidence](docs/START-EVIDENCE.md) and [stop evidence](docs/STOP-EVIDENCE.md): preserve uncertain journals; no automatic repair or forced escalation.
+
 ## Experimental inert layer staging
 
 `gcontainers image stage-layer ABS_FILE tar|tar+gzip sha256:HEX DESCRIPTOR_BYTES PRIVATE_PARENT --experimental` stages a single digest- and size-pinned archive into a newly generated private directory under an existing user-owned mode-0700 parent. It uses the existing strict layer parser in the same hashed stream, rejects links, whiteouts, devices, privilege metadata and unsupported framing, and writes regular files mode 0600. Failed validation cleans only the new tree; unexpected identity changes require manual review. It is inert data staging, not a complete OCI rootfs unpacker, immutable snapshot, authenticated provenance or execution authorization. No existing tree is overwritten.
@@ -126,4 +135,4 @@ On a disposable Linux x86-64 test environment, run `scripts/oci-smoke.sh --prepa
 
 ## Licensing
 
-The original GoreeCloud source in this repository is offered under the [MIT License](LICENSE). No third-party runtime source is vendored. OCI specifications and `crun`/`runc` are independent upstream projects with their own licenses.
+The development branch contains the existing [MIT License](LICENSE) notice. The protected source-admission candidate preserves both existing notices; source-rights verification remains open (issue #13). No third-party runtime source is vendored. OCI specifications and `crun`/`runc` are independent upstream projects with their own licenses.

@@ -1,6 +1,6 @@
 # GoreeCloud Containers — Stable acceptance gates
 
-**Status:** experimental development review; **NOT STABLE, NOT DEPLOYED**. Last reviewed November 16, 2026. This is a release gate register, not an authorization to start workloads or a replacement for GoreeCloud's canonical Drive policies.
+**Status:** experimental development review; **NOT STABLE, NOT DEPLOYED**. Last reviewed November 26, 2026. This is a release gate register, not an authorization to start workloads or a replacement for GoreeCloud's canonical Drive policies.
 
 ## Non-negotiable platform direction
 
@@ -12,8 +12,8 @@ GoreeCloud Containers is the intended **first-priority container platform when i
 | --- | --- | --- |
 | Go CLI, original code, bounded OCI policy | CI, tests, vet, build, selected fuzz tests | **Incomplete** — security review and OS acceptance missing |
 | OCI runtime security | Strict nonroot mapping/profile, patched version gate, minimal state parser, cooperative per-ID locks, private pending-operation journal with double-read incident consistency, fail-closed status reads and post-flock pathname identity recheck, per-operation root-owned low-level runtime version/provenance revalidation and inert laptop user/mount/PID/IPC/UTS/network namespace separation test with pinned self-executable and privacy-minimized pipe-only child comparison | **PARTIAL** — isolated real rootless lifecycle and limited confinement probes passed; broader confinement and recovery unverified |
-| OCI images | Bounded hash verification, private opaque blob store, read-only audit (including unresolved import staging and unsafe ownership/permissions and post-hash path identity recheck), private SHA-256 Verify, cooperating 1-GiB committed-blob write quota, cross-process lock test, tar/gzip preflight and same-stream caller-pinned SHA-256 digest, optional exact compressed OCI descriptor byte-count verification and post-read OCI layout blob/index/manifest inode identity checks | **BLOCKED** — no authenticated registry, secure unpacker or signature verification |
-| Host resources | Read-only cgroup/userns capability probe; caller-supplied stack capacity math | **BLOCKED** — actual cgroup delegation and enforcement not implemented |
+| OCI images | Bounded hash verification, private opaque blob store, read-only audit (including unresolved import staging and unsafe ownership/permissions and post-hash path identity recheck), private SHA-256 Verify, cooperating 1-GiB committed-blob write quota, cross-process lock test, tar/gzip preflight and same-stream caller-pinned SHA-256 digest, optional exact compressed OCI descriptor byte-count verification and post-read OCI layout blob/index/manifest inode identity checks | **PARTIAL** — pinned single-blob HTTPS retrieval and inert ordered layers verified; authentication, full OCI extraction and signatures outstanding |
+| Host resources | Read-only cgroup/userns capability probe; caller-supplied stack capacity math | **PARTIAL** — real isolated cgroup v2 CPU/memory/PID readback passed; saturation, swap, and wider host enforcement outstanding |
 | Native stack | JSON validator, dependency stages, fingerprint, read-only transition diff, dependency blast-radius, explicit old-plus-new budget, caller-supplied revision conflict checks, combined single-source preflight and redacted fail-closed secret-reference and OCI image-reference change reviews plus mandatory GoreeCloud Identity review on every actual spec transition and post-read source-declaration inode identity recheck | **BLOCKED** — executor, health checks and rollback not implemented |
 | MIPS systems | Boundaries documented; offline sensitive secret/image-change flags for Identity, GoreeShield and Wardveil without granting approvals | **BLOCKED** — no implemented/proven platform integration |
 | VPS Mesh staging | No production action from this review branch | **BLOCKED** — isolated canary, service parity, observability and recovery required |
@@ -44,7 +44,7 @@ GoreeCloud Containers is the intended **first-priority container platform when i
 
 ### M5–M8 — Platform and cutover
 
-- [ ] Secure versioned local API, least-privilege authorization, telemetry without prohibited data collection, reliable supervision, and maintenance support.
+- [ ] Secure versioned local API and same-UID client are implemented and tested; verified Identity authorization, telemetry privacy, reliable supervision, remote access and maintenance remain outstanding.
 - [ ] **GoreeCloud UI:** verified common design system and accessibility.
 - [ ] **GoreeCloud Mesh:** verified integration and data-flow contracts.
 - [ ] **GoreeCloud Identity:** authenticated, least-privilege operator and service access.
