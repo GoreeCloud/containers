@@ -62,7 +62,7 @@ func (s *Store) fetchRegistryBlob(ctx context.Context, client *http.Client, orig
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return BlobInfo{}, errors.New("registry refused blob; authentication and redirects unsupported")
+		return BlobInfo{}, errors.New("registry refused blob; redirects and automatic credential exchange unsupported")
 	}
 	if response.ContentLength >= 0 && response.ContentLength != size {
 		return BlobInfo{}, errors.New("registry content length mismatch")
