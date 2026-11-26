@@ -96,3 +96,41 @@ func TestLocalReceiptPinsAndPaths(t *testing.T) {
 		t.Fatal("duplicate stop accepted")
 	}
 }
+
+func TestPersistentEventsRequireExactStartup(t *testing.T) {
+	_, p := exerciseSpec(t)
+	rec := localReceipt{StopWaves: p.StopWaves}
+	events := append(expectedExerciseEvents(p), exerciseEvent{Phase: "persistent-running-verified"})
+	render := func(es []exerciseEvent) []byte {
+		var lines []string
+		for _, ev := range es {
+			b, _ := json.Marshal(ev)
+			lines = append(lines, string(b))
+		}
+		return []byte(strings.Join(lines, "\n") + "\n")
+	}
+	valid := render(events)
+	if err := validatePersistentEvents(valid, rec); err != nil {
+		t.Fatal(err)
+	}
+	wrongWave := append([]exerciseEvent(nil), events...)
+	wrongWave[2].Wave++
+	wrongID := append([]exerciseEvent(nil), events...)
+	wrongID[2].IDs = []string{"wrong-instance"}
+	cases := map[string][]byte{
+		"final only":      render(events[len(events)-1:]),
+		"missing intent":  render(append(append([]exerciseEvent(nil), events[:2]...), events[3:]...)),
+		"wrong wave":      render(wrongWave),
+		"wrong instance":  render(wrongID),
+		"incomplete line": valid[:len(valid)-1],
+		"duplicate field": []byte(strings.Replace(string(valid), `"phase":"session-created"`, `"phase":"session-created","phase":"session-created"`, 1)),
+		"extra event":     render(append(append([]exerciseEvent(nil), events...), events[len(events)-1])),
+	}
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := validatePersistentEvents(data, rec); err == nil {
+				t.Fatal("invalid evidence accepted")
+			}
+		})
+	}
+}
