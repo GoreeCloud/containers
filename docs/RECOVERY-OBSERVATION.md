@@ -5,3 +5,7 @@
 Recovery observation now rejects replacement of a pending marker even when its content is identical, including inode, mode, length, modification and Linux change-time checks around the runtime read. Synthetic marker replacement and rewrite regressions passed; no marker is cleared and no automated reconciliation is authorized. Same-UID races and runtime backend binding remain outside this evidence.
 
 Runtime root and control-directory identity are checked before and after cooperative locks, and before runtime invocation and journal cleanup. Replacement of the named root or journal directory preserves the original pending marker and returns a recovery-required error. Tests replace the private directory during a synthetic callback; this does not provide atomic path binding or hostile same-UID isolation.
+
+## Recovery assessment
+
+gcontainers recovery-assess runc|crun ID [--expected-observation-sha256 DIGEST] derives a fixed review category from the existing anchored pending observation. For create/start/kill a matching state is a provisional observed postcondition only, never identity proof. Delete failure is never inferred as absence. The redacted assessment digest supports comparing a prior review with a fresh read; it is not a marker inode, PID or authorization pin. Unresolved operations return nonzero, journal remains unchanged, no runtime mutation or automatic clearing. Matrix tests and repeated marker preservation passed.
