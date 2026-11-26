@@ -22,3 +22,7 @@ On the authorized laptop, the first-party synthetic CAS fixture started two inde
 ```sh
 bash scripts/stack-exercise-smoke.sh --execute
 ```
+
+### Read-only session audit
+
+Run gcontainers stack audit-session SPEC ADMISSION ADMISSION_SHA SESSION to compare the initial private receipt and exact phase-log prefix against the independently reviewed plan and live runtime inventory. Returns aggregate counts and the recorded phase; no runtime identifiers, paths or mutation. Rejects skipped phases, incomplete lines, mismatched plan or admission, out-of-session bundle paths and changing records. Only a completed finite exercise with empty matching inventory observes cleanup evidence. Persistent-session and incomplete-operation records require separate review; no authorization or automatic recovery. Live finite fixture audit and strict-prefix tests passed.
