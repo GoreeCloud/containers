@@ -61,7 +61,7 @@ func discoverManifestWithBytes(ctx context.Context, c *http.Client, origin, repo
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return empty, errors.New("manifest retrieval refused; auth and redirects unsupported")
+		return empty, errors.New("manifest retrieval refused; redirects and automatic credential exchange unsupported")
 	}
 	media, _, e := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if e != nil || media != MediaManifest {

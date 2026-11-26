@@ -11,8 +11,8 @@ import (
 )
 
 func pullStage(args []string, out io.Writer) error {
-	if len(args) != 7 || args[6] != "--experimental" {
-		return errors.New("usage: image pull-stage EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE PRIVATE_PARENT --experimental")
+	if (len(args) != 7 || args[6] != "--experimental") && (len(args) != 9 || args[6] != "--bearer-file" || args[8] != "--experimental") {
+		return errors.New("usage: image pull-stage EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE PRIVATE_PARENT [--bearer-file PRIVATE_TOKEN_FILE] --experimental")
 	}
 	n, e := strconv.ParseInt(args[4], 10, 64)
 	if e != nil || n <= 0 || strconv.FormatInt(n, 10) != args[4] {
@@ -24,7 +24,12 @@ func pullStage(args []string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
-	report, e := s.PullAndStage(ctx, args[1], args[2], args[3], n, args[5])
+	var report ociimage.PullStageReport
+	if len(args) == 9 {
+		report, e = s.PullAndStageAuthenticated(ctx, args[1], args[2], args[3], n, args[5], args[7])
+	} else {
+		report, e = s.PullAndStage(ctx, args[1], args[2], args[3], n, args[5])
+	}
 	if e != nil {
 		return e
 	}
