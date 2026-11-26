@@ -21,7 +21,7 @@ Start the existing foreground local API against an already prepared private runt
 build/linux/x64/debug/bundle/goreecloud_containers ABS_CLI SHA256 ABS_SOCKET
 ```
 
-No automatic refresh, persistence, command shell, workload mutations, or deployment controls. Only aggregate counters are rendered. The dashboard clears stale values before refresh and suppresses raw subprocess errors. Local CLI binary pin checks reduce accidental mismatch; same-user file replacement between verification and launch remains possible. The Go client validates socket peer and response schema; same UID is not GoreeCloud Identity.
+No startup or unattended refresh, persistence, command shell, workload mutations, or deployment controls. An explicit foreground monitoring session observes up to ten summaries at two-second intervals after each completed request; stops on recovery, unavailable response, operator stop, leaving overview or loss of foreground. An already in-flight read may finish; no new read is scheduled after stopping. No automatic repair or historical persistence. Only aggregate counters are rendered. The dashboard clears stale values before refresh and suppresses raw subprocess errors. Local CLI binary pin checks reduce accidental mismatch; same-user file replacement between verification and launch remains possible. The Go client validates socket peer and response schema; same UID is not GoreeCloud Identity.
 
 ## Evidence
 
