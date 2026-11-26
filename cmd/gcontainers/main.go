@@ -78,6 +78,8 @@ func run(args []string, out io.Writer) error {
 		return watchCommand(args[1:], out)
 	case "inventory":
 		return inventoryCommand(args[1:], out)
+	case "recovery-assess":
+		return recoveryAssess(args[1:], out)
 	case "recovery-observe":
 		return recoveryObserve(args[1:], out)
 	case "oci":
@@ -247,6 +249,7 @@ Usage:
   gcontainers wait runc|crun ID SECONDS
   gcontainers watch runc|crun SAMPLES INTERVAL_SECONDS
   gcontainers inventory runc|crun
+  gcontainers recovery-assess runc|crun ID [--expected-observation-sha256 DIGEST]
   gcontainers recovery-observe runc|crun ID
   gcontainers kernel-probe  # inert rootless namespace check, NOT OCI acceptance
   gcontainers image audit --store ABS_EXISTING_STORE_DIR

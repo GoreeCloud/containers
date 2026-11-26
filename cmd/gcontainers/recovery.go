@@ -12,7 +12,17 @@ import (
 	"time"
 )
 
-func recoveryObserve(args []string, out io.Writer) error {
+func recoveryObserve(args []string, out io.Writer) error { return recoveryCommand(args, out, false) }
+func recoveryAssess(args []string, out io.Writer) error  { return recoveryCommand(args, out, true) }
+func recoveryCommand(args []string, out io.Writer, assess bool) error {
+	expected := ""
+	if assess && len(args) == 4 && args[2] == "--expected-observation-sha256" {
+		expected = args[3]
+		if expected == "" {
+			return errors.New("expected observation pin required")
+		}
+		args = args[:2]
+	}
 	if len(args) != 2 || (args[0] != "runc" && args[0] != "crun") {
 		return errors.New("usage: recovery-observe runc|crun ID")
 	}
@@ -38,6 +48,19 @@ func recoveryObserve(args []string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if assess {
+		r, err := e.AssessRecovery(ctx, args[1], expected)
+		if err != nil {
+			return err
+		}
+		if err = json.NewEncoder(out).Encode(r); err != nil {
+			return err
+		}
+		if r.RecoveryRequired {
+			return engine.ErrUnresolvedMutation
+		}
+		return nil
+	}
 	report, err := e.ObserveRecovery(ctx, args[1])
 	if err != nil {
 		return err
