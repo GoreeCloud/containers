@@ -125,6 +125,10 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - [Bounded lifecycle wait](docs/WAIT-PREVIEW.md): read-only stopped-state observation with pending-journal refusal; no exit code or instance identity guarantee.
 - [Recovery observation](docs/RECOVERY-OBSERVATION.md), [start evidence](docs/START-EVIDENCE.md) and [stop evidence](docs/STOP-EVIDENCE.md): preserve uncertain journals and reject in-place marker changes with Linux change-time evidence; no automatic repair or forced escalation.
 
+## Native replica orchestration planning
+
+`gcontainers stack instance-plan SPEC [--expected-plan-sha256 DIGEST]` expands a validated declaration into deterministic per-replica IDs, complete dependency barriers, parallel startup waves and reverse shutdown waves. It checks a canonical plan pin on demand; reports remain dry-run only, with health and MIPS authorization false. See [instance planning](docs/INSTANCE-PLAN.md).
+
 ## Experimental inert layer staging
 
 `gcontainers image stage-layer ABS_FILE tar|tar+gzip sha256:HEX DESCRIPTOR_BYTES PRIVATE_PARENT --experimental` stages a single digest- and size-pinned archive into a newly generated private directory under an existing user-owned mode-0700 parent. It uses the existing strict layer parser in the same hashed stream, rejects links, whiteouts, devices, privilege metadata and unsupported framing, and writes regular files mode 0600. Failed validation cleans only the new tree; unexpected identity changes require manual review. It is inert data staging, not a complete OCI rootfs unpacker, immutable snapshot, authenticated provenance or execution authorization. No existing tree is overwritten.
