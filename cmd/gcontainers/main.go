@@ -59,8 +59,12 @@ func run(args []string, out io.Writer) error {
 			return errors.New("doctor takes no arguments")
 		}
 		return doctor(out)
+	case "snapshot-delegated":
+		return delegatedSnapshot(args[1:], out)
 	case "snapshot":
 		return bundleSnapshot(args[1:], out)
+	case "preflight-delegated":
+		return delegatedPreflight(args[1:], out)
 	case "preflight":
 		return bundlePreflight(args[1:], out)
 	case "validate":
@@ -225,12 +229,13 @@ func usage(w io.Writer) error {
 	_, err := fmt.Fprintln(w, `GoreeCloud Containers 0.1.0-dev — Linux rootless OCI preview
 Usage:
   gcontainers doctor
+  gcontainers snapshot-delegated ABS_BUNDLE PRIVATE_PARENT --experimental
   gcontainers snapshot ABS_BUNDLE PRIVATE_PARENT --experimental
   gcontainers image select-index EXISTING_STORE INDEX_SHA SIZE amd64|arm64
   gcontainers image discover-manifest HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
   gcontainers image fetch-blob EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
   gcontainers image pull-stage EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE PRIVATE_PARENT [--bearer-file PRIVATE_TOKEN_FILE] [--whiteouts] --experimental
-  gcontainers image prepare-bundle EXISTING_STORE MANIFEST_SHA SIZE CONFIG_FILE CONFIG_SHA ENTRYPOINT_SHA PRIVATE_PARENT [--whiteouts] --experimental
+  gcontainers image prepare-bundle EXISTING_STORE MANIFEST_SHA SIZE CONFIG_FILE CONFIG_SHA ENTRYPOINT_SHA PRIVATE_PARENT [--whiteouts] [--delegated-guest] --experimental
   gcontainers image assemble-manifest EXISTING_STORE SHA256 SIZE PRIVATE_PARENT [--whiteouts] --experimental
   gcontainers image assemble PRIVATE_PARENT (ABS_FILE tar|tar+gzip SHA256 SIZE){1,8} --experimental
   gcontainers volume verify-backup BACKUP_DIR SHA256
@@ -266,8 +271,10 @@ Usage:
   gcontainers stack preflight OLD_STACK_JSON NEW_STACK_JSON --expected-current-sha256 sha256:HEX --cpu-milli N --memory-mib N --max-instances N
   gcontainers stack capacity NATIVE_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
   gcontainers validate BUNDLE_DIRECTORY
+  gcontainers preflight-delegated ABS_BUNDLE
   gcontainers preflight BUNDLE_DIRECTORY  # read-only policy + guest layout diagnostics; no runtime
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
+  gcontainers oci create --runtime runc --id NAME --bundle ABS_BUNDLE --delegated-guest --experimental
   gcontainers oci start|stop|delete --id NAME --experimental
   gcontainers oci state --id NAME
   gcontainers oci pending-summary  # privacy-minimized inventory, fails on incidents
@@ -344,11 +351,15 @@ func oci(args []string, w io.Writer) error {
 	dir := fs.String("bundle", "", "OCI bundle directory")
 	backend := fs.String("runtime", "crun", "OCI runtime: crun or runc")
 	experimental := fs.Bool("experimental", false, "explicit consent to preview execution")
+	delegated := fs.Bool("delegated-guest", false, "explicit nonroot guest preview")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		return errors.New("unexpected positional argument")
+	}
+	if *delegated && (action != "create" || !*experimental || *backend != "runc") {
+		return errors.New("delegated guest requires explicit experimental runc create")
 	}
 	if action == "pending-summary" {
 		if *id != "" || *dir != "" || *experimental || *backend != "crun" {
@@ -444,7 +455,11 @@ func oci(args []string, w io.Writer) error {
 	defer cancel()
 	switch action {
 	case "create":
-		err = e.Create(ctx, *id, *dir)
+		if *delegated {
+			err = e.CreateDelegated(ctx, *id, *dir)
+		} else {
+			err = e.Create(ctx, *id, *dir)
+		}
 	case "start":
 		err = e.Start(ctx, *id)
 	case "stop":

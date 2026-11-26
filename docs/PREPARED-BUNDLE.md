@@ -5,3 +5,5 @@ The explicit experimental image prepare-bundle command assembles a local manifes
 The --prepare-only mode runs in protected CI without invoking a runtime; --execute requires the existing audited pinned runc fixture.
 
 Explicit --whiteouts before --experimental reuses the verified two-pass offline whiteout subset before checking the selected static executable pin and separately reviewed runtime configuration. Default remains strict. CI validates synthetic tar/gzip lower-layer removal, same-layer executable replacement, wrong-pin rejection and private cleanup without executing; laptop --execute --whiteouts exercises the first-party rootless lifecycle. No general OCI semantics, dynamic ELF, links, provenance or automatic admission.
+
+The separate --delegated-guest option selects the documented restricted non-root x86-64 guest profile. It verifies existing local subordinate allocations and normalizes guest-readable payload within the new private bundle, preserving the independently pinned static executable and config. See DELEGATED-GUEST.md; no runtime launch from preparation.
