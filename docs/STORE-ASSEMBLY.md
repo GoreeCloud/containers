@@ -21,3 +21,5 @@ The synthetic whiteout CLI fixture scripts/whiteout-smoke.sh passed and is inclu
 ## Pinned local platform selection
 
 gcontainers image select-index EXISTING_STORE INDEX_SHA SIZE amd64|arm64 verifies a single-level OCI index and selects exactly one Linux baseline platform, then verifies that manifest and its config bytes and platform/diff-ID metadata. Refuses duplicate digest, ambiguity, wrong config platform, unsupported constraints or nested index, missing bytes and wrong pin. Emits only pinned descriptors; layer contents, provenance and execution are not verified. Use the returned manifest digest and size with existing assemble-manifest or prepare-bundle. No registry access or tag lookup.
+
+The synthetic CLI fixture scripts/index-selection-smoke.sh validates local amd64 and arm64 selection and subsequent exact manifest assembly, with no network or runtime execution. Added to hosted CI.
