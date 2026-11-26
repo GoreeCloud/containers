@@ -100,6 +100,9 @@ func run(args []string, out io.Writer) error {
 		_, err = fmt.Fprintln(out, string(payload))
 		return err
 	case "stack":
+		if len(args) >= 2 && args[1] == "instance-plan" {
+			return instancePlan(args[2:], out)
+		}
 		if len(args) == 4 && args[1] == "restart-plan" {
 			spec, err := stack.Load(args[2])
 			if err != nil {
