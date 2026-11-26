@@ -39,6 +39,10 @@ func inspectLayer(ctx context.Context, input io.Reader, mediaType string, consum
 	return inspectLayerDecoded(ctx, input, mediaType, consume, nil)
 }
 func inspectLayerDecoded(ctx context.Context, input io.Reader, mediaType string, consume func(string, bool, int64, io.Reader) error, decodedHash hash.Hash) (LayerReport, error) {
+	return inspectLayerPolicy(ctx, input, mediaType, consume, decodedHash, nil)
+}
+func inspectLayerPolicy(ctx context.Context, input io.Reader, mediaType string, consume func(string, bool, int64, io.Reader) error, decodedHash hash.Hash, whiteout func(string) error) (LayerReport, error) {
+
 	var empty LayerReport
 	if ctx == nil || input == nil {
 		return empty, errors.New("layer inspection requires context and input")
@@ -115,7 +119,34 @@ func inspectLayerDecoded(ctx context.Context, input io.Reader, mediaType string,
 			return empty, errors.New("unsafe OCI layer entry path")
 		}
 		if strings.HasPrefix(path.Base(name), ".wh.") {
-			return empty, errors.New("OCI whiteout processing is not supported in preview")
+			if whiteout == nil {
+				return empty, errors.New("OCI whiteout processing is not supported in preview")
+			}
+			if (header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA) || header.Size != 0 || seen[name] != 0 || implied[name] {
+				return empty, errors.New("invalid OCI whiteout marker")
+			}
+			for _, part := range strings.Split(path.Dir(name), "/") {
+				if strings.HasPrefix(part, ".wh.") {
+					return empty, errors.New("whiteout ancestor unsupported")
+				}
+			}
+			seen[name] = 'f'
+			for parent := path.Dir(name); parent != "." && parent != "/"; parent = path.Dir(parent) {
+				if seen[parent] == 'f' {
+					return empty, errors.New("whiteout parent is a regular file")
+				}
+				implied[parent] = true
+			}
+			if err := whiteout(name); err != nil {
+				return empty, err
+			}
+			report.FileCount++
+			continue
+		}
+		for _, part := range strings.Split(path.Dir(name), "/") {
+			if strings.HasPrefix(part, ".wh.") {
+				return empty, errors.New("whiteout ancestor unsupported")
+			}
 		}
 		if seen[name] != 0 {
 			return empty, errors.New("duplicate OCI layer entry path")

@@ -225,7 +225,7 @@ Usage:
   gcontainers image fetch-blob EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
   gcontainers image pull-stage EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE PRIVATE_PARENT [--bearer-file PRIVATE_TOKEN_FILE] --experimental
   gcontainers image prepare-bundle EXISTING_STORE MANIFEST_SHA SIZE CONFIG_FILE CONFIG_SHA ENTRYPOINT_SHA PRIVATE_PARENT --experimental
-  gcontainers image assemble-manifest EXISTING_STORE SHA256 SIZE PRIVATE_PARENT --experimental
+  gcontainers image assemble-manifest EXISTING_STORE SHA256 SIZE PRIVATE_PARENT [--whiteouts] --experimental
   gcontainers image assemble PRIVATE_PARENT (ABS_FILE tar|tar+gzip SHA256 SIZE){1,8} --experimental
   gcontainers volume verify-backup BACKUP_DIR SHA256
   gcontainers volume backup PRIVATE_STORE ID PRIVATE_BACKUP_PARENT --experimental

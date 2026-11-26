@@ -39,6 +39,8 @@ jobs:
         run: bash scripts/prepared-bundle-smoke.sh --prepare-only
       - name: Verify private volume backup and restore CLI
         run: bash scripts/volume-backup-smoke.sh
+      - name: Verify explicit offline OCI whiteout assembly
+        run: bash scripts/whiteout-smoke.sh
       - name: Vet
         run: go vet ./...
       - name: Build
