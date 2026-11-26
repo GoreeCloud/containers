@@ -258,6 +258,8 @@ func parseLocalReceipt(raw []byte, pin, session, dir string) (localReceipt, erro
 }
 
 type LocalSessionReport struct {
+	ReadOnly               bool   `json:"readOnly"`
+	StopResumeChecksPassed bool   `json:"stopResumeChecksPassed"`
 	ReceiptSHA256          string `json:"receiptSHA256"`
 	Expected               int    `json:"expected"`
 	Running                int    `json:"running"`
@@ -283,9 +285,14 @@ func ManageLocal(ctx context.Context, dir, pin, binary string, stop bool) (Local
 func ResumeLocalStop(ctx context.Context, dir, pin, binary string) (LocalSessionReport, error) {
 	return manageLocal(ctx, dir, pin, binary, true, true)
 }
+
+// ReviewLocalStop reuses the exact resume preconditions but never mutates a workload or releases a lease.
+func ReviewLocalStop(ctx context.Context, dir, pin, binary string) (LocalSessionReport, error) {
+	return manageLocal(ctx, dir, pin, binary, false, true)
+}
 func manageLocal(ctx context.Context, dir, pin, binary string, stop, resume bool) (LocalSessionReport, error) {
 
-	var r LocalSessionReport
+	r := LocalSessionReport{ReadOnly: !stop, RecoveryReviewRequired: true}
 	if ctx == nil || os.Geteuid() == 0 || filepath.Base(binary) != "runc" || !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
 		return r, errors.New("private local session required")
 	}
@@ -435,8 +442,23 @@ func manageLocal(ctx context.Context, dir, pin, binary string, stop, resume bool
 	if e = check(); e != nil {
 		return r, e
 	}
+	if e = checkMapping(mapping, rec.Mapping, dir); e != nil {
+		return r, e
+	}
+	// Re-read the exact receipt and prior stop intent after inventory observations.
+	confirmed, _, e := readPrivateRecord(root, "local-receipt.json", 64<<10)
+	if e != nil || !bytes.Equal(raw, confirmed) {
+		return r, errors.New("local receipt changed during review")
+	}
+	if resume {
+		intent, _, e := readPrivateRecord(root, "stop-intent", 128)
+		if e != nil || string(intent) != pin+"\n" {
+			return r, errors.New("stop intent changed")
+		}
+	}
 	r.BindingsObserved = true
-	r.RecoveryReviewRequired = false
+	r.StopResumeChecksPassed = resume
+	r.RecoveryReviewRequired = resume
 	if !stop {
 		return r, nil
 	}
