@@ -27,3 +27,27 @@ The synthetic CLI fixture scripts/index-selection-smoke.sh validates local amd64
 ## Explicit registry-to-whiteout assembly
 
 Append --whiteouts before --experimental in pull-stage (after optional --bearer-file PRIVATE_TOKEN_FILE). Reuses the pinned HTTPS retrieval, store audit and exact manifest/config/layer verification, then applies the existing double-pass inert whiteout policy. Default still refuses whiteouts. Synthetic TLS registry tests verify anonymous and scoped bearer retrieval, tar/gzip replacement, default refusal, cache reuse, and no token in the report. No tag resolution, external credential exchange, general rootfs semantics or execution.
+
+## Offline pinned OCI layout import
+
+```sh
+gcontainers image import-layout EXISTING_STORE ABS_LAYOUT INDEX_SHA MANIFEST_SHA SIZE PRIVATE_PARENT [--whiteouts] --experimental
+```
+
+Explicitly select one direct manifest from an independently pinned index.json. Requires a valid OCI 1.0.0 layout marker, unique direct descriptors, exact manifest size/digest, exact configuration, supported Linux architecture and bounded tar/gzip layers. Reads through a checked source directory anchor, independently verifies every imported byte with existing CAS admission (including reused objects), and reuses ordered inert assembly for decoded DiffID verification. Default rejects whiteouts; the explicit flag enables the existing restricted policy. Counts describe objects present or absent when individually checked; concurrent writers can make this distinction advisory. Only verified opaque CAS objects may remain after an error; there is no tag publication, external request, execution or provenance claim. Source paths must be absolute and non-symlink; changing directories or source blob identity is rejected, not an immutable filesystem snapshot. No nested indexes or foreign layers.
+
+Tests verify raw/gzip layers, exact source index/manifest pins, whiteout replacement, source corruption, unsupported duplicate/symlink descriptors, wrong DiffID, cache reuse and clean failed staging. Actual offline CLI fixture passed with an unrelated seed blob and four selected descriptors.
+
+```sh
+bash scripts/layout-import-smoke.sh
+```
+
+## Export a pinned manifest to a portable OCI layout
+
+```sh
+gcontainers image export-layout EXISTING_STORE MANIFEST_SHA SIZE PRIVATE_PARENT [--whiteouts] --experimental
+```
+
+Select one exact manifest, copy only the verified manifest/config/layer graph into a new random owner-private layout under an existing separate private parent. No source store mutation or tags, no network and no execution. Each copied blob is size/hash checked, each decoded layer DiffID and restricted archive framing is checked, and the complete layout is independently verified. The optional whiteout policy validates removal-marker syntax but does not apply overlay semantics at export. The index is generated deterministically for the selected manifest. Retain the returned index pin independently. Partial private output on an error is preserved for review; it is not a successful export. A failure before index publication leaves no index. A later verifier failure may leave a complete-looking but unaccepted directory. Never treat directory existence alone as success.
+
+Actual CLI test: import pinned raw/gzip whiteout layout, export the four selected blobs without the unrelated store seed, verify the portable layout, reimport into a distinct store and compare the final inert tree. Default whiteout rejection and wrong size tests passed. No source provenance, signature, general OCI compatibility or execution authorization.
