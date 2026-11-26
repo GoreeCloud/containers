@@ -79,6 +79,13 @@ func discoverManifest(ctx context.Context, c *http.Client, origin, repo, digest 
 	if e = ctx.Err(); e != nil {
 		return empty, e
 	}
+	return parsePinnedManifest(raw, digest, size)
+}
+func parsePinnedManifest(raw []byte, digest string, size int64) (ManifestDiscovery, error) {
+	var empty ManifestDiscovery
+	if size <= 0 || size > maxMetadataBytes || int64(len(raw)) != size || fmt.Sprintf("sha256:%x", sha256.Sum256(raw)) != digest {
+		return empty, errors.New("manifest descriptor mismatch")
+	}
 	obj, e := decodeObject(raw)
 	if e != nil {
 		return empty, e

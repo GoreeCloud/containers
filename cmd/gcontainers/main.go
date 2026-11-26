@@ -216,6 +216,7 @@ Usage:
   gcontainers snapshot ABS_BUNDLE PRIVATE_PARENT --experimental
   gcontainers image discover-manifest HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
   gcontainers image fetch-blob EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
+  gcontainers image assemble-manifest EXISTING_STORE SHA256 SIZE PRIVATE_PARENT --experimental
   gcontainers image assemble PRIVATE_PARENT (ABS_FILE tar|tar+gzip SHA256 SIZE){1,8} --experimental
   gcontainers volume create PRIVATE_STORE ID --experimental
   gcontainers volume inspect PRIVATE_STORE ID
@@ -447,6 +448,9 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "assemble-manifest" {
+		return storeManifestAssembly(args[1:], out)
+	}
 	if len(args) > 0 && args[0] == "discover-manifest" {
 		return manifestDiscovery(args[1:], out)
 	}
