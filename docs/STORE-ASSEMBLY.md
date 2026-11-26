@@ -5,3 +5,5 @@
 ## Bounded registry-to-staging pipeline
 
 `gcontainers image pull-stage EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE PRIVATE_PARENT --experimental` uses the same private store and exact manifest pin. It verifies cached objects before reuse, fetches and validates config before downloading layer blobs, deduplicates descriptors, and calls the same offline assembly with diff IDs. No authentication, redirects, tag resolution, publisher verification or execution; all network requests use the explicitly selected HTTPS origin. Verified CAS blobs can remain after partial failure; the staging tree is discarded, and there is no atomic image/tag registration. Local TLS end-to-end test verifies download, cache reuse without network, corruption rejection and no partial staging.
+
+The repeatable first-party `bash scripts/store-assembly-smoke.sh` fixture imports two layers (tar and gzip), config and manifest, assembles the ordered data through the actual CLI, checks the replaced file/mode, rejects wrong descriptor size without an extra tree and audits all four stored blobs. CI runs this fixture without networking or launching a guest.
