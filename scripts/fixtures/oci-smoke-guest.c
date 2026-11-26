@@ -18,6 +18,9 @@
 #ifndef GC_GUEST_ID
 #define GC_GUEST_ID 0
 #endif
+#ifndef GC_GUEST_TICKS
+#define GC_GUEST_TICKS 300
+#endif
 
 #ifdef GC_LOCAL_IO_PROBE
 /* Only connect to a socket created in this same isolated namespace. */
@@ -108,7 +111,7 @@ int main(void) {
     action.sa_handler = on_term;
     if (sigaction(SIGTERM, &action, 0) != 0) return 20;
     /* Remain alive only after the checks; self-terminate if the caller dies. */
-    for (int i = 0; i < 300 && !stop; i++) {
+    for (int i = 0; i < GC_GUEST_TICKS && !stop; i++) {
         struct timespec delay = {0, 100000000L};
         nanosleep(&delay, 0);
     }
