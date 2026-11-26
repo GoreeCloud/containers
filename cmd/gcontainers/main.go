@@ -122,6 +122,9 @@ func run(args []string, out io.Writer) error {
 		if len(args) > 1 && (args[1] == "start-local" || args[1] == "status-local" || args[1] == "stop-local" || args[1] == "resume-stop") {
 			return localSession(args[1], args[2:], out)
 		}
+		if len(args) > 1 && args[1] == "audit-session" {
+			return sessionAudit(args[2:], out)
+		}
 		if len(args) > 1 && args[1] == "review-exercise" {
 			return stackExercise(args[2:], out, true)
 		}
@@ -283,6 +286,7 @@ Usage:
   gcontainers stack status-local SESSION RECEIPT_SHA
   gcontainers stack stop-local SESSION RECEIPT_SHA --experimental
   gcontainers stack resume-stop SESSION RECEIPT_SHA --experimental
+  gcontainers stack audit-session SPEC ADMISSION ADMISSION_SHA SESSION
   gcontainers stack review-exercise SPEC ADMISSION ADMISSION_SHA
   gcontainers stack exercise SPEC ADMISSION ADMISSION_SHA EXISTING_STORE PRIVATE_PARENT --experimental
   gcontainers stack observe SPEC runc|crun --expected-plan-sha256 DIGEST
