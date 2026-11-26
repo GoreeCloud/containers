@@ -27,6 +27,18 @@ func (e *Engine) ObserveRecovery(ctx context.Context, id string) (out RecoveryOb
 			return err
 		}
 		defer root.Close()
+		rootBefore, err := root.Lstat(".")
+		if err != nil {
+			return err
+		}
+		journalBefore, err := root.Lstat("journal")
+		if err != nil {
+			return err
+		}
+		verifyDirs := func() error { return verifyRuntimeDirectories(root, e.StateRoot, rootBefore, "journal", journalBefore) }
+		if err = verifyDirs(); err != nil {
+			return err
+		}
 		name := "journal/" + id + ".pending"
 		before, err := root.Lstat(name)
 		if err != nil && !os.IsNotExist(err) {
@@ -42,7 +54,7 @@ func (e *Engine) ObserveRecovery(ctx context.Context, id string) (out RecoveryOb
 				return errors.New("pending marker disappeared before observation")
 			}
 			out.Observation = "no_pending_mutation"
-			return nil
+			return verifyDirs()
 		}
 		if before == nil {
 			return errors.New("pending marker appeared before observation")
@@ -62,6 +74,9 @@ func (e *Engine) ObserveRecovery(ctx context.Context, id string) (out RecoveryOb
 			return errors.New("pending mutation changed during recovery observation")
 		}
 		if err := verifyRecoveryMarker(root, name, before); err != nil {
+			return err
+		}
+		if err = verifyDirs(); err != nil {
 			return err
 		}
 		return ctx.Err()
