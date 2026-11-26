@@ -86,3 +86,22 @@ func TestSnapshotRejectsLinksAndCleans(t *testing.T) {
 		})
 	}
 }
+
+func TestSnapshotMountIdentity(t *testing.T) {
+	for _, raw := range []string{"", "mnt_id: 0", "mnt_id: 1\nmnt_id: 2", "mnt_id: -1"} {
+		if _, e := parseMountID(raw); e == nil {
+			t.Fatal("invalid mount id accepted")
+		}
+	}
+	if n, e := parseMountID("pos: 0\nmnt_id:\t42\n"); e != nil || n != 42 {
+		t.Fatal(n, e)
+	}
+	f, e := os.Open(t.TempDir())
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer f.Close()
+	if n, e := fileMountID(f); e != nil || n == 0 {
+		t.Fatal(n, e)
+	}
+}
