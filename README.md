@@ -118,6 +118,7 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - [Registry blob retrieval](docs/REGISTRY-PREVIEW.md): explicit HTTPS origin and exact descriptor, no authentication, redirects or full image resolution.
 - [Pinned OCI manifest discovery](docs/MANIFEST-DISCOVERY.md): exact caller-supplied manifest digest and size, typed configuration/layer descriptors, no tag lookup or automatic downloads.
 - [Pinned registry pull and inert staging](docs/STORE-ASSEMBLY.md): retrieve one explicit manifest and its referenced blobs, reuse verified CAS content and verify ordered uncompressed diff IDs. No executable image or tag resolution.
+- [Restricted executable bundle preparation](docs/PREPARED-BUNDLE.md): separately pinned local OCI config and one static ELF entrypoint; no automatic launch or source trust.
 - [Content-store manifest assembly](docs/STORE-ASSEMBLY.md): verifies pinned manifest, config, compressed descriptors and ordered uncompressed diff IDs in inert staging.
 - [Ordered inert layer assembly](docs/ASSEMBLY-PREVIEW.md): up to eight pinned layers; no whiteouts, links, executable permissions or full OCI semantics.
 - [Private volume directories](docs/VOLUME-PREVIEW.md): exclusive creation, cooperative maximum 1,024 directories and aggregate inventory; no mounting, byte quota, backup or deletion.
