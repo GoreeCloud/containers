@@ -1,0 +1,22 @@
+{
+  "apiVersion": "goreecloud.containers/v1alpha1",
+  "kind": "Stack",
+  "metadata": { "name": "synthetic-preview" },
+  "services": [
+    {
+      "name": "web",
+      "image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "replicas": 1,
+      "dependsOn": ["db"],
+      "resources": { "cpuMilli": 250, "memoryBytes": 33554432 },
+      "security": { "runAsNonRoot": true, "readOnlyRootFilesystem": true, "network": "isolated" }
+    },
+    {
+      "name": "db",
+      "image": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "replicas": 1,
+      "resources": { "cpuMilli": 250, "memoryBytes": 33554432 },
+      "security": { "runAsNonRoot": true, "readOnlyRootFilesystem": true, "network": "isolated" }
+    }
+  ]
+}
