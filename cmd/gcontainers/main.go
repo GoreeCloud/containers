@@ -63,6 +63,8 @@ func run(args []string, out io.Writer) error {
 		return delegatedSnapshot(args[1:], out)
 	case "snapshot":
 		return bundleSnapshot(args[1:], out)
+	case "delegated-observe":
+		return delegatedObserve(args[1:], out)
 	case "preflight-delegated":
 		return delegatedPreflight(args[1:], out)
 	case "preflight":
@@ -82,6 +84,8 @@ func run(args []string, out io.Writer) error {
 		return watchCommand(args[1:], out)
 	case "inventory":
 		return inventoryCommand(args[1:], out)
+	case "recovery-summary":
+		return recoverySummary(args[1:], out)
 	case "recovery-assess":
 		return recoveryAssess(args[1:], out)
 	case "recovery-observe":
@@ -254,6 +258,7 @@ Usage:
   gcontainers wait runc|crun ID SECONDS
   gcontainers watch runc|crun SAMPLES INTERVAL_SECONDS
   gcontainers inventory runc|crun
+  gcontainers recovery-summary runc|crun
   gcontainers recovery-assess runc|crun ID [--expected-observation-sha256 DIGEST]
   gcontainers recovery-observe runc|crun ID
   gcontainers kernel-probe  # inert rootless namespace check, NOT OCI acceptance
@@ -278,6 +283,7 @@ Usage:
   gcontainers stack preflight OLD_STACK_JSON NEW_STACK_JSON --expected-current-sha256 sha256:HEX --cpu-milli N --memory-mib N --max-instances N
   gcontainers stack capacity NATIVE_STACK_JSON --cpu-milli N --memory-mib N --max-instances N
   gcontainers validate BUNDLE_DIRECTORY
+  gcontainers delegated-observe runc ID ABS_BUNDLE
   gcontainers preflight-delegated ABS_BUNDLE
   gcontainers preflight BUNDLE_DIRECTORY  # read-only policy + guest layout diagnostics; no runtime
   gcontainers oci create --id NAME --bundle DIRECTORY --experimental
