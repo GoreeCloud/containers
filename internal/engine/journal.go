@@ -38,7 +38,8 @@ func journalRoot(stateRoot string) (*os.Root, error) {
 	if !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) != stateRoot {
 		return nil, errors.New("invalid absolute state root")
 	}
-	if err := privateDir(stateRoot); err != nil {
+	before, err := capturePrivateRuntimeRoot(stateRoot)
+	if err != nil {
 		return nil, err
 	}
 	root, err := os.OpenRoot(stateRoot)
@@ -47,12 +48,15 @@ func journalRoot(stateRoot string) (*os.Root, error) {
 	}
 	release := func(err error) (*os.Root, error) { root.Close(); return nil, err }
 	info, err := root.Lstat(".")
-	if err != nil || privateStateInfo(info) != nil {
+	if err != nil || privateStateInfo(info) != nil || !os.SameFile(before, info) {
 		return release(errors.New("untrusted runtime root"))
 	}
 	dir, err := root.Lstat("journal")
 	if err != nil || privateStateInfo(dir) != nil {
 		return release(errors.New("missing or unsafe OCI journal directory"))
+	}
+	if err = verifyRuntimeDirectories(root, stateRoot, before, "journal", dir); err != nil {
+		return release(err)
 	}
 	return root, nil
 }
@@ -85,6 +89,18 @@ func RunJournaledMutation(ctx context.Context, stateRoot, id, op string, action 
 		return nil, err
 	}
 	defer root.Close()
+	before, err := root.Lstat(".")
+	if err != nil {
+		return nil, err
+	}
+	journalBefore, err := root.Lstat("journal")
+	if err != nil {
+		return nil, err
+	}
+	verifyDirs := func() error { return verifyRuntimeDirectories(root, stateRoot, before, "journal", journalBefore) }
+	if err = verifyDirs(); err != nil {
+		return nil, err
+	}
 	name := "journal/" + id + ".pending"
 	output, err := json.Marshal(journalRecord{Version: 1, ID: id, Operation: op})
 	if err != nil {
@@ -119,6 +135,9 @@ func RunJournaledMutation(ctx context.Context, stateRoot, id, op string, action 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err = verifyDirs(); err != nil {
+		return nil, errors.Join(ErrUnresolvedMutation, err)
+	}
 	result, err := action()
 	if err != nil {
 		return nil, fmt.Errorf("%w: runtime returned uncertain state: %v", ErrUnresolvedMutation, err)
@@ -129,11 +148,17 @@ func RunJournaledMutation(ctx context.Context, stateRoot, id, op string, action 
 	if err := verifyPendingIdentity(root, name, markerInfo); err != nil {
 		return nil, err
 	}
+	if err = verifyDirs(); err != nil {
+		return nil, errors.Join(ErrUnresolvedMutation, err)
+	}
 	if err := root.Remove(name); err != nil {
 		return nil, fmt.Errorf("OCI operation succeeded but journal cleanup needs recovery: %w", err)
 	}
 	if err := syncJournalDirectory(root); err != nil {
 		return nil, fmt.Errorf("OCI journal completion sync failed: %w", err)
+	}
+	if err = verifyDirs(); err != nil {
+		return nil, errors.Join(ErrUnresolvedMutation, err)
 	}
 	return result, nil
 }
