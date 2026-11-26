@@ -211,6 +211,14 @@ func (e *Engine) callWithResources(ctx context.Context, resources *bundle.Resour
 					}
 				}
 			}
+			if op == "start" {
+				// A successful launcher exit is not proof that the guest ran.
+				// Preserve the pending marker if start cannot be corroborated.
+				state, err := e.readState(ctx, id)
+				if err != nil || state.Status != "running" || state.PID <= 0 {
+					return nil, errors.New("post-start running state not verified")
+				}
+			}
 			return result, nil
 		})
 	}
