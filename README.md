@@ -4,7 +4,7 @@
 
 GoreeCloud Containers is being built as the eventual default containerization solution for the GoreeCloud ecosystem, with a design goal of permanently replacing Docker and Podman as the default management engines after independently verified stability. Docker, Docker Compose, and Podman remain optional, second-priority compatibility paths; none is required by the intended stable GoreeCloud Containers engine.
 
-> **Status: 0.1.0-dev / experimental foundation. Not production-ready.** A restricted rootless OCI lifecycle, private content store, digest-pinned HTTPS manifest/blob retrieval with verified cache reuse and inert ordered layer assembly, restricted separately pinned static executable bundle preparation, private volume directories, explicitly scoped bearer-file retrieval and local read-only API are implemented. General executable OCI image preparation/build, automatic registry authentication exchange and tag resolution, volume mounting, networking, daemon, Compose execution, GUI, remote control and cluster orchestration are not implemented. Do not migrate production containers.
+> **Status: 0.1.0-dev / experimental foundation. Not production-ready.** A restricted rootless OCI lifecycle, private content store, digest-pinned HTTPS manifest/blob retrieval with verified cache reuse and inert ordered layer assembly, restricted separately pinned static executable bundle preparation, private volume backup/restore, explicitly scoped bearer-file retrieval, local read-only API and native Flutter Linux dashboard are implemented. General executable OCI image preparation/build, automatic registry authentication exchange and tag resolution, volume mounting, networking, daemon, Compose execution, graphical workload mutations, remote control and cluster orchestration are not implemented. Do not migrate production containers.
 
 ## Ecosystem deployment preference (founder direction, November 17, 2026)
 
@@ -126,7 +126,7 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - **GoreeCloud Identity:** authenticate and authorize remote management (future; no remote endpoint currently exists).
 - **GoreeShield:** consent, data minimization, retention, and privacy controls (future adapter).
 - **Wardveil:** container security policy, image scanning, detection and response (future adapter).
-- **GoreeCloud UI:** the sole design authority for any future graphical management client.
+- **GoreeCloud UI:** the sole design authority; the native Flutter Linux read-only preview adopts its pinned source adapter.
 
 ## Current experimental capabilities
 
@@ -142,6 +142,10 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - [Bounded lifecycle wait](docs/WAIT-PREVIEW.md): read-only stopped-state observation with pending-journal refusal; no exit code or instance identity guarantee.
 - [Runtime inventory](docs/RUNTIME-INVENTORY.md): bounded private runtime metadata and pending-operation inventory, with per-ID observations and no repair.
 - [Recovery observation](docs/RECOVERY-OBSERVATION.md), [start evidence](docs/START-EVIDENCE.md) and [stop evidence](docs/STOP-EVIDENCE.md): preserve uncertain journals and reject in-place marker changes with Linux change-time evidence; no automatic repair or forced escalation.
+
+## Native Linux dashboard
+
+The [Flutter Linux desktop preview](desktop/dashboard/README.md) uses the pinned MIT gc-ui Flutter adapter and existing Go Unix API client for explicitly refreshed aggregate runtime counts, recovery warnings and safety guidance. Source analyzer, widget/schema tests, native debug build, synthetic live local bridge and isolated normal-window startup passed on the laptop. It does not expose mutations or MIPS authorization. Physical display, assistive technology, installer and release review are outstanding.
 
 ## Native replica orchestration planning
 
