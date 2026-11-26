@@ -132,6 +132,7 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 
 - [Private bundle snapshots](docs/PRIVATE-SNAPSHOT.md): bounded copy and digest, not immutable or authorized for execution.
 - [Registry blob retrieval](docs/REGISTRY-PREVIEW.md): explicit HTTPS origin and exact descriptor, no authentication, redirects or full image resolution.
+- [Pinned OCI manifest discovery](docs/MANIFEST-DISCOVERY.md): exact caller-supplied manifest digest and size, typed configuration/layer descriptors, no tag lookup or automatic downloads.
 - [Ordered inert layer assembly](docs/ASSEMBLY-PREVIEW.md): up to eight pinned layers; no whiteouts, links, executable permissions or full OCI semantics.
 - [Private volume directories](docs/VOLUME-PREVIEW.md): exclusive creation and aggregate inventory; no mounting, quota, backup or deletion.
 - [Local API](docs/LOCAL-API.md) and [client](docs/LOCAL-CLIENT.md): private same-UID Unix socket, read-only health and journal, no TCP or MIPS identity grant.

@@ -2,6 +2,7 @@ package bundle
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -10,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/GoreeCloud/containers/internal/regularinput"
@@ -51,12 +54,23 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 	if rel, e := filepath.Rel(source, parent); e == nil && filepath.IsLocal(rel) {
 		return report, errors.New("destination must not be inside source")
 	}
+	sourceBefore, e := os.Lstat(source)
+	if e != nil {
+		return report, e
+	}
 	src, e := os.OpenRoot(source)
 	if e != nil {
 		return report, e
 	}
 	defer src.Close()
 	srcInfo, e := src.Stat(".")
+	if e != nil {
+		return report, e
+	}
+	if !os.SameFile(sourceBefore, srcInfo) {
+		return report, errors.New("source root changed while opening")
+	}
+	sourceMount, e := rootMountID(src)
 	if e != nil {
 		return report, e
 	}
@@ -71,32 +85,58 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 	if _, e = snapshotInfo(parentInfo, true, 0); e != nil || parentInfo.Mode().Perm()&0077 != 0 {
 		return report, errors.New("private owner-only snapshot parent required")
 	}
-	dir, e := os.MkdirTemp(parent, "bundle-")
+	base, e := os.OpenRoot(parent)
 	if e != nil {
 		return report, e
 	}
-	initial, e := os.Lstat(dir)
+	defer base.Close()
+	openedParent, e := base.Stat(".")
+	if e != nil || !os.SameFile(parentInfo, openedParent) {
+		return report, errors.New("snapshot parent changed while opening")
+	}
+	parentMount, e := rootMountID(base)
+	if e != nil {
+		return report, e
+	}
+	var nonce [16]byte
+	if _, e = rand.Read(nonce[:]); e != nil {
+		return report, e
+	}
+	name := "bundle-" + hex.EncodeToString(nonce[:])
+	if e = base.Mkdir(name, 0700); e != nil {
+		return report, e
+	}
+	dir := filepath.Join(parent, name)
+	initial, e := base.Lstat(name)
 	if e != nil {
 		return report, e
 	}
 	keep := false
 	defer func() {
 		if !keep {
-			current, e := os.Lstat(dir)
+			current, e := base.Lstat(name)
 			if e != nil || !os.SameFile(initial, current) {
 				err = errors.Join(err, errors.New("snapshot identity changed; review required"))
 				return
 			}
-			if e = os.RemoveAll(dir); e != nil {
+			if e = base.RemoveAll(name); e != nil {
 				err = errors.Join(err, errors.New("snapshot cleanup failed"))
 			}
 		}
 	}()
-	dst, e := os.OpenRoot(dir)
+	dst, e := base.OpenRoot(name)
 	if e != nil {
 		return report, e
 	}
 	defer dst.Close()
+	opened, e := dst.Stat(".")
+	if e != nil || !os.SameFile(initial, opened) {
+		return report, errors.New("snapshot destination changed")
+	}
+	destMount, e := rootMountID(dst)
+	if e != nil || destMount != parentMount {
+		return report, errors.New("snapshot destination mount changed")
+	}
 	// Copy the restricted source tree without following links. Validate the
 	// copied config and rootfs before exposing the result.
 	digest := sha256.New()
@@ -132,6 +172,10 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 				f.Close()
 				return errors.New("snapshot source directory changed")
 			}
+			if m, e := fileMountID(f); e != nil || m != sourceMount {
+				f.Close()
+				return errors.New("snapshot source mount boundary crossed")
+			}
 			names, e := f.ReadDir(MaxSnapshotFiles + 1)
 			f.Close()
 			if e != nil && e != io.EOF {
@@ -152,7 +196,15 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 			if e != nil || !os.SameFile(info, after) || !info.ModTime().Equal(after.ModTime()) {
 				return errors.New("snapshot directory changed")
 			}
-			return nil
+			df, e := dst.Open(rel)
+			if e != nil {
+				return e
+			}
+			if m, e := fileMountID(df); e != nil || m != destMount {
+				df.Close()
+				return errors.New("snapshot destination mount boundary crossed")
+			}
+			return errors.Join(df.Sync(), df.Close())
 		}
 		if info.Size() < 0 || info.Size() > MaxSnapshotBytes-report.Bytes {
 			return errors.New("snapshot byte quota exceeded")
@@ -162,6 +214,9 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 			return e
 		}
 		defer in.Close()
+		if m, e := fileMountID(in); e != nil || m != sourceMount {
+			return errors.New("snapshot source mount boundary crossed")
+		}
 		mode := os.FileMode(0400)
 		if info.Mode().Perm()&0100 != 0 {
 			mode = 0500
@@ -169,6 +224,10 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 		out, e := dst.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 		if e != nil {
 			return e
+		}
+		if m, e := fileMountID(out); e != nil || m != destMount {
+			out.Close()
+			return errors.New("snapshot destination mount boundary crossed")
 		}
 		fmt.Fprintf(digest, "f:%d:%s:%o:%d\n", len(rel), rel, mode, info.Size())
 		n, e := io.CopyN(io.MultiWriter(out, digest), in, info.Size())
@@ -196,6 +255,10 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 	if e = walk("."); e != nil {
 		return SnapshotReport{}, e
 	}
+	sourceAfter, e := os.Lstat(source)
+	if e != nil || !os.SameFile(sourceBefore, sourceAfter) {
+		return SnapshotReport{}, errors.New("source root path changed")
+	}
 	spec, e := Load(dir)
 	if e != nil {
 		return SnapshotReport{}, e
@@ -220,6 +283,13 @@ func Snapshot(ctx context.Context, source, parent string) (report SnapshotReport
 	if e = ctx.Err(); e != nil {
 		return SnapshotReport{}, e
 	}
+	df, e := base.Open(".")
+	if e != nil {
+		return SnapshotReport{}, e
+	}
+	if e = errors.Join(df.Sync(), df.Close()); e != nil {
+		return SnapshotReport{}, e
+	}
 	report.Directory = dir
 	report.ContentSHA256 = "sha256:" + hex.EncodeToString(digest.Sum(nil))
 	keep = true
@@ -231,4 +301,44 @@ func snapshotInfo(info os.FileInfo, dir bool, dev uint64) (uint64, error) {
 		return 0, errors.New("unsafe snapshot entry ownership, mode, link or filesystem")
 	}
 	return uint64(st.Dev), nil
+}
+
+// Linux fdinfo identifies the mount of an already-open file, including
+// same-device bind mounts, without trusting a path or parsing mount names.
+func rootMountID(r *os.Root) (uint64, error) {
+	f, e := r.Open(".")
+	if e != nil {
+		return 0, e
+	}
+	defer f.Close()
+	return fileMountID(f)
+}
+func fileMountID(f *os.File) (uint64, error) {
+	info, e := os.Open(fmt.Sprintf("/proc/self/fdinfo/%d", f.Fd()))
+	if e != nil {
+		return 0, e
+	}
+	defer info.Close()
+	raw, e := io.ReadAll(io.LimitReader(info, 65537))
+	if e != nil || len(raw) > 65536 {
+		return 0, errors.New("mount identity unavailable")
+	}
+	return parseMountID(string(raw))
+}
+func parseMountID(raw string) (uint64, error) {
+	var id uint64
+	for _, line := range strings.Split(raw, "\n") {
+		if !strings.HasPrefix(line, "mnt_id:") {
+			continue
+		}
+		n, e := strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(line, "mnt_id:")), 10, 64)
+		if e != nil || n == 0 || id != 0 {
+			return 0, errors.New("invalid mount identity")
+		}
+		id = n
+	}
+	if id == 0 {
+		return 0, errors.New("mount identity missing")
+	}
+	return id, nil
 }
