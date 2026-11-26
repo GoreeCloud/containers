@@ -1,0 +1,449 @@
+package stack
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"github.com/GoreeCloud/containers/internal/engine"
+	"github.com/GoreeCloud/containers/internal/regularinput"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"syscall"
+	"time"
+)
+
+var localSessionName = regexp.MustCompile("^stack-exercise-[0-9]+$")
+var localRuntimeName = regexp.MustCompile("^gc-ex-[a-f0-9]{40}$")
+
+type localLease struct {
+	root     *os.Root
+	lock     *os.File
+	parent   string
+	identity os.FileInfo
+}
+
+func acquireLocalLease(ctx context.Context, parent string) (*localLease, error) {
+	if ctx == nil || os.Geteuid() == 0 {
+		return nil, errors.New("nonroot context required")
+	}
+	i, e := privateExerciseDir(parent)
+	if e != nil {
+		return nil, e
+	}
+	root, e := os.OpenRoot(parent)
+	if e != nil {
+		return nil, e
+	}
+	l := &localLease{root: root, parent: parent, identity: i}
+	f, e := root.OpenFile("local-session.lock", os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
+	if e != nil {
+		root.Close()
+		return nil, e
+	}
+	l.lock = f
+	info, e := f.Stat()
+	if e != nil || !privateRecord(info, 0600) {
+		l.close()
+		return nil, errors.New("unsafe session lock")
+	}
+	for {
+		if e = ctx.Err(); e != nil {
+			l.close()
+			return nil, e
+		}
+		e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if e == nil {
+			break
+		}
+		if e != syscall.EWOULDBLOCK {
+			l.close()
+			return nil, e
+		}
+		select {
+		case <-ctx.Done():
+			l.close()
+			return nil, ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if e = l.check(); e != nil {
+		l.close()
+		return nil, e
+	}
+	return l, nil
+}
+func privateRecord(i os.FileInfo, mode os.FileMode) bool {
+	if i == nil || !i.Mode().IsRegular() || i.Mode().Perm() != mode || i.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
+		return false
+	}
+	st, ok := i.Sys().(*syscall.Stat_t)
+	return ok && st.Uid == uint32(os.Geteuid()) && st.Nlink == 1
+}
+func (l *localLease) close() {
+	if l.lock != nil {
+		l.lock.Close()
+	}
+	l.root.Close()
+}
+func (l *localLease) check() error {
+	i, e := privateExerciseDir(l.parent)
+	if e != nil || !os.SameFile(i, l.identity) {
+		return errors.New("session parent replaced")
+	}
+	j, e := l.root.Stat(".")
+	if e != nil || !os.SameFile(i, j) {
+		return errors.New("session parent anchor mismatch")
+	}
+	a, e := l.root.Lstat("local-session.lock")
+	if e != nil || !privateRecord(a, 0600) {
+		return errors.New("session lock replaced")
+	}
+	b, e := l.lock.Stat()
+	if e != nil || !os.SameFile(a, b) {
+		return errors.New("session lock identity changed")
+	}
+	return nil
+}
+func syncDirectory(r *os.Root) error {
+	f, e := r.Open(".")
+	if e != nil {
+		return e
+	}
+	return errors.Join(f.Sync(), f.Close())
+}
+func (l *localLease) requireVacant() error {
+	if e := l.check(); e != nil {
+		return e
+	}
+	if _, e := l.root.Lstat("active-session"); !os.IsNotExist(e) {
+		return errors.New("active or uncertain local session; review required")
+	}
+	return nil
+}
+func (l *localLease) reserve(session string) error {
+	if !localSessionName.MatchString(session) {
+		return errors.New("invalid session directory name")
+	}
+	if e := l.requireVacant(); e != nil {
+		return e
+	}
+	f, e := l.root.OpenFile("active-session", os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
+	if e != nil {
+		return e
+	}
+	_, e = f.WriteString(session + "\n")
+	if e == nil {
+		e = f.Sync()
+	}
+	if e = errors.Join(e, f.Close()); e != nil {
+		return e
+	}
+	if e = syncDirectory(l.root); e != nil {
+		return e
+	}
+	return l.checkActive(session)
+}
+func readPrivateRecord(r *os.Root, name string, max int64) ([]byte, os.FileInfo, error) {
+	i, e := r.Lstat(name)
+	if e != nil || !privateRecord(i, 0600) || i.Size() <= 0 || i.Size() > max {
+		return nil, nil, errors.New("invalid private session record")
+	}
+	f, e := regularinput.Open(r, name, i)
+	if e != nil {
+		return nil, nil, e
+	}
+	defer f.Close()
+	b, e := io.ReadAll(io.LimitReader(f, max+1))
+	if e != nil || int64(len(b)) != i.Size() {
+		return nil, nil, errors.New("session record changed")
+	}
+	if e = verifyStackInputIdentity(r, f, i, name); e != nil {
+		return nil, nil, e
+	}
+	return b, i, nil
+}
+func (l *localLease) checkActive(session string) error {
+	if e := l.check(); e != nil {
+		return e
+	}
+	raw, _, e := readPrivateRecord(l.root, "active-session", 128)
+	if e != nil || string(raw) != session+"\n" {
+		return errors.New("active session binding mismatch")
+	}
+	return nil
+}
+func (l *localLease) release(session string) error {
+	if e := l.checkActive(session); e != nil {
+		return e
+	}
+	if e := l.root.Remove("active-session"); e != nil {
+		return e
+	}
+	return syncDirectory(l.root)
+}
+
+type localReceipt struct {
+	Version         int                               `json:"version"`
+	Session         string                            `json:"session"`
+	PlanSHA256      string                            `json:"planSHA256"`
+	AdmissionSHA256 string                            `json:"admissionSHA256"`
+	StopWaves       [][]string                        `json:"stopWaves"`
+	Bindings        map[string]engine.InstanceBinding `json:"bindings"`
+}
+
+func writeLocalReceipt(root *os.Root, r localReceipt) (string, error) {
+	raw, e := json.Marshal(r)
+	if e != nil {
+		return "", e
+	}
+	f, e := root.OpenFile("local-receipt.json", os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
+	if e != nil {
+		return "", e
+	}
+	_, e = f.Write(raw)
+	if e == nil {
+		e = f.Sync()
+	}
+	if e = errors.Join(e, f.Close()); e != nil {
+		return "", e
+	}
+	if e = syncDirectory(root); e != nil {
+		return "", e
+	}
+	return digestBytes(raw), nil
+}
+func parseLocalReceipt(raw []byte, pin, session, dir string) (localReceipt, error) {
+	var r localReceipt
+	if len(raw) > 64<<10 || !imagePattern.MatchString(pin) || digestBytes(raw) != pin {
+		return r, errors.New("local receipt pin mismatch")
+	}
+	if e := rejectDuplicate(raw); e != nil {
+		return r, e
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if e := d.Decode(&r); e != nil {
+		return r, e
+	}
+	if e := d.Decode(new(any)); e != io.EOF {
+		return r, errors.New("trailing local receipt")
+	}
+	if r.Version != 1 || r.Session != session || !localSessionName.MatchString(session) || !imagePattern.MatchString(r.PlanSHA256) || !imagePattern.MatchString(r.AdmissionSHA256) || len(r.Bindings) < 1 || len(r.Bindings) > 4 || len(r.StopWaves) < 1 || len(r.StopWaves) > 4 {
+		return r, errors.New("invalid local receipt")
+	}
+	seen := map[string]bool{}
+	runtimeIDs := map[string]bool{}
+	for _, w := range r.StopWaves {
+		if len(w) == 0 || len(w) > 4 {
+			return r, errors.New("invalid stop wave")
+		}
+		for _, id := range w {
+			b, ok := r.Bindings[id]
+			if !ok || seen[id] || engine.ValidateID(id) != nil || !localRuntimeName.MatchString(b.ID) || runtimeIDs[b.ID] || !imagePattern.MatchString(b.ProcessSHA256) || b.MetadataInode == 0 || filepath.Dir(b.Bundle) != filepath.Join(dir, "bundles") || filepath.Clean(b.Bundle) != b.Bundle {
+				return r, errors.New("invalid bound instance receipt")
+			}
+			seen[id] = true
+			runtimeIDs[b.ID] = true
+		}
+	}
+	if len(seen) != len(r.Bindings) {
+		return r, errors.New("incomplete local receipt")
+	}
+	return r, nil
+}
+
+type LocalSessionReport struct {
+	ReceiptSHA256          string `json:"receiptSHA256"`
+	Expected               int    `json:"expected"`
+	Running                int    `json:"running"`
+	Stopped                int    `json:"stopped"`
+	Pending                bool   `json:"pending"`
+	BindingsObserved       bool   `json:"bindingsObserved"`
+	CleanupVerified        bool   `json:"cleanupVerified"`
+	RecoveryReviewRequired bool   `json:"recoveryReviewRequired"`
+	HealthVerified         bool   `json:"healthVerified"`
+	DeploymentAuthorized   bool   `json:"deploymentAuthorized"`
+}
+
+func StartLocal(ctx context.Context, s Spec, admission, pin, store, parent, binary string) (ExerciseReport, error) {
+	return runExercise(ctx, s, admission, pin, store, parent, binary, true)
+}
+
+// Inspect or stop only the exact receipt selected by the caller. No automatic
+// replay after an interrupted stop, no action on unmatched or pending IDs.
+func ManageLocal(ctx context.Context, dir, pin, binary string, stop bool) (LocalSessionReport, error) {
+	var r LocalSessionReport
+	if ctx == nil || os.Geteuid() == 0 || filepath.Base(binary) != "runc" || !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
+		return r, errors.New("private local session required")
+	}
+	session := filepath.Base(dir)
+	if !localSessionName.MatchString(session) {
+		return r, errors.New("invalid local session name")
+	}
+	lease, e := acquireLocalLease(ctx, filepath.Dir(dir))
+	if e != nil {
+		return r, e
+	}
+	defer lease.close()
+	if e = lease.checkActive(session); e != nil {
+		return r, e
+	}
+	i, e := privateExerciseDir(dir)
+	if e != nil {
+		return r, e
+	}
+	root, e := os.OpenRoot(dir)
+	if e != nil {
+		return r, e
+	}
+	defer root.Close()
+	check := func() error {
+		if e := lease.checkActive(session); e != nil {
+			return e
+		}
+		a, e := privateExerciseDir(dir)
+		if e != nil || !os.SameFile(i, a) {
+			return errors.New("local session replaced")
+		}
+		b, e := root.Stat(".")
+		if e != nil || !os.SameFile(i, b) {
+			return errors.New("local session anchor mismatch")
+		}
+		return nil
+	}
+	if e = check(); e != nil {
+		return r, e
+	}
+	raw, _, e := readPrivateRecord(root, "local-receipt.json", 64<<10)
+	if e != nil {
+		return r, e
+	}
+	rec, e := parseLocalReceipt(raw, pin, session, dir)
+	if e != nil {
+		return r, e
+	}
+	r.ReceiptSHA256 = pin
+	r.Expected = len(rec.Bindings)
+	r.RecoveryReviewRequired = true
+	if _, e = root.Lstat("stop-intent"); !os.IsNotExist(e) {
+		return r, errors.New("previous stop intent exists; recovery review required")
+	}
+	log, _, e := readPrivateRecord(root, "events.ndjson", 64<<10)
+	if e != nil {
+		return r, e
+	}
+	lines := bytes.Split(bytes.TrimSpace(log), []byte("\n"))
+	var last exerciseEvent
+	if len(lines) == 0 || json.Unmarshal(lines[len(lines)-1], &last) != nil || last.Phase != "persistent-running-verified" {
+		return r, errors.New("persistent start evidence incomplete")
+	}
+	stateRoot := filepath.Join(dir, "runtime", "goreecloud-containers")
+	if _, e = privateExerciseDir(stateRoot); e != nil {
+		return r, e
+	}
+	rt, e := engine.New(binary, stateRoot, nil)
+	if e != nil {
+		return r, e
+	}
+	before, e := rt.Inventory(ctx)
+	if e != nil {
+		return r, e
+	}
+	r.Pending = before.RecoveryRequired
+	if before.RecoveryRequired || len(before.Entries) != len(rec.Bindings) {
+		return r, errors.New("local inventory uncertain or incomplete")
+	}
+	expected := map[string]engine.InstanceBinding{}
+	for _, b := range rec.Bindings {
+		expected[b.ID] = b
+	}
+	for _, x := range before.Entries {
+		b, ok := expected[x.ID]
+		if !ok || !x.MetadataPresent || x.PendingOperation != "" {
+			return r, errors.New("unexpected runtime instance")
+		}
+		status, e := rt.CheckBinding(ctx, b)
+		if e != nil || status != x.Status {
+			return r, errors.New("runtime binding or state changed")
+		}
+		if status == "running" {
+			r.Running++
+		} else if status == "stopped" {
+			r.Stopped++
+		} else {
+			return r, errors.New("unexpected local state")
+		}
+	}
+	after, e := rt.Inventory(ctx)
+	if e != nil || !reflect.DeepEqual(before, after) {
+		return r, errors.New("local inventory changed")
+	}
+	if e = check(); e != nil {
+		return r, e
+	}
+	r.BindingsObserved = true
+	r.RecoveryReviewRequired = false
+	if !stop {
+		return r, nil
+	}
+	// Durable intent before first signal, never automatically resume on failure.
+	r.RecoveryReviewRequired = true
+	f, e := root.OpenFile("stop-intent", os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
+	if e != nil {
+		return r, e
+	}
+	_, e = f.WriteString(pin + "\n")
+	if e == nil {
+		e = f.Sync()
+	}
+	if e = errors.Join(e, f.Close()); e != nil {
+		return r, e
+	}
+	if e = syncDirectory(root); e != nil {
+		return r, e
+	}
+	for _, wave := range rec.StopWaves {
+		if e = check(); e != nil {
+			return r, e
+		}
+		if e = parallelInstances(ctx, wave, func(c context.Context, id string) error { return rt.StopBound(c, rec.Bindings[id]) }); e != nil {
+			return r, errors.New("bound stop wave incomplete; preserve session")
+		}
+		if e = parallelInstances(ctx, wave, func(c context.Context, id string) error { return rt.DeleteBound(c, rec.Bindings[id]) }); e != nil {
+			return r, errors.New("bound deletion wave incomplete; preserve session")
+		}
+	}
+	inv, e := rt.Inventory(ctx)
+	if e != nil || inv.RecoveryRequired || len(inv.Entries) != 0 {
+		return r, errors.New("local cleanup inventory uncertain")
+	}
+	if e = check(); e != nil {
+		return r, e
+	}
+	f, e = root.OpenFile("cleanup-verified", os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
+	if e != nil {
+		return r, e
+	}
+	_, e = f.WriteString(pin + "\n")
+	if e == nil {
+		e = f.Sync()
+	}
+	if e = errors.Join(e, f.Close()); e != nil {
+		return r, e
+	}
+	if e = syncDirectory(root); e != nil {
+		return r, e
+	}
+	if e = lease.release(session); e != nil {
+		return r, e
+	}
+	r.Running = 0
+	r.Stopped = 0
+	r.CleanupVerified = true
+	r.RecoveryReviewRequired = false
+	return r, nil
+}

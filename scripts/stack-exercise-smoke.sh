@@ -2,7 +2,7 @@
 # Explicit first-party synthetic image, never production; no host allocation edits.
 set -euo pipefail
 umask 077
-[[ "$#" == 1 && "$1" == --execute && "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
+[[ ( "$#" == 1 || ( "$#" == 2 && "$2" == --persistent ) ) && "$1" == --execute && "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
 cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
 printf '%s  %s\n' 50dcc0b257d724fe07f3852c2dda52340223f038227c7572644eec870741223e /usr/local/bin/runc | sha256sum -c -
 prepare="$(GC_SMOKE_RESOURCES=1 bash scripts/oci-smoke.sh --prepare-only)"
@@ -57,6 +57,36 @@ pin="$(cat "$workspace/admission.pin")"
 "$gc" stack review-exercise "$workspace/stack.json" "$workspace/admission.json" "$pin" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["instances"]==3 and r["waves"]==2 and r["readOnly"] and not r["deploymentAuthorized"]'
 if "$gc" stack exercise "$workspace/stack.json" "$workspace/admission.json" "sha256:$(printf '%064d' 0)" "$workspace/store" "$workspace/sessions" --experimental;then exit 1;fi
 test -z "$(find "$workspace/sessions" -mindepth 1 -maxdepth 1 -print -quit)"
+if [[ "${2:-}" == --persistent ]];then
+ "$gc" stack start-local "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" --experimental > "$workspace/local.json"
+ mapfile -t values < <(python3 - "$workspace/local.json" <<'PYLOCAL'
+import json,sys
+r=json.load(open(sys.argv[1]));assert r["persistent"] and r["allDelegatedEvidenceObserved"] and r["completedWaves"]==2 and not r["cleanupVerified"] and not r["deploymentAuthorized"]
+print(r["sessionDirectory"]);print(r["receiptSHA256"])
+PYLOCAL
+ )
+ session="${values[0]}";receipt="${values[1]}"
+ "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["running"]==3 and r["bindingsObserved"] and not r["recoveryReviewRequired"]'
+ if "$gc" stack start-local "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" --experimental;then exit 1;fi
+ if "$gc" stack stop-local "$session" "sha256:$(printf '%064d' 0)" --experimental;then exit 1;fi
+ "$gc" stack status-local "$session" "$receipt" | python3 -c 'import json,sys;assert json.load(sys.stdin)["running"]==3'
+ "$gc" stack stop-local "$session" "$receipt" --experimental | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["cleanupVerified"] and not r["recoveryReviewRequired"]'
+ test ! -e "$workspace/sessions/active-session"
+ test -f "$session/cleanup-verified"
+ if "$gc" stack stop-local "$session" "$receipt" --experimental;then exit 1;fi
+ # A fresh generation can reuse the same dedicated private slot after cleanup.
+ "$gc" stack start-local "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" --experimental > "$workspace/next.json"
+ mapfile -t next < <(python3 - "$workspace/next.json" <<'PYNEXT'
+import json,sys
+r=json.load(open(sys.argv[1]));print(r["sessionDirectory"]);print(r["receiptSHA256"])
+PYNEXT
+ )
+ [[ "${next[0]}" != "$session" && "${next[1]}" != "$receipt" ]]
+ "$gc" stack stop-local "${next[0]}" "${next[1]}" --experimental | python3 -c 'import json,sys;assert json.load(sys.stdin)["cleanupVerified"]'
+ test ! -e "$workspace/sessions/active-session"
+ echo PERSISTENT_LOCAL_STACK_PASS
+ exit 0
+fi
 "$gc" stack exercise "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" --experimental > "$workspace/exercise.json"
 python3 - "$workspace" <<'PY'
 import json,pathlib,sys
