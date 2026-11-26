@@ -13,3 +13,5 @@ The repeatable synthetic CLI fixture scripts/volume-backup-smoke.sh passed on th
 ## Read-only backup verification
 
 gcontainers volume verify-backup BACKUP_DIR SHA256 recomputes the identical canonical normalized payload digest through the existing safe traversal without allocating a restore directory or writing payload. Detects tampering and wrong pins, checks source root identity, enforces existing size/entry/mount bounds and emits only aggregate counts and digest. Does not attest live application consistency or immutable backup storage. The CLI fixture verifies before restore.
+
+`gcontainers volume fingerprint PRIVATE_STORE ID [SHA256]` compares two bounded quiesced content observations under the cooperating store lock. The digest matches the existing backup/restore format; an optional independent pin verifies restored or pre-attachment contents. No copy, mount, live application consistency, or storage authorization is implied. Quiesce the application before using a digest as a recovery checkpoint.
