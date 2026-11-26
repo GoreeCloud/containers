@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:goreecloud_ui_expressive/goreecloud_ui_expressive.dart';
 import 'runtime_summary.dart';
 
 void main(List<String> args) {
-  // No discovery, background polling, configuration persistence or remote
+  // No discovery, automatic startup polling, configuration persistence or remote
   // access. The operator supplies a reviewed CLI digest and socket.
   final SummarySource? source =
       args.length == 3 ? LocalSummarySource(args[0], args[1], args[2]) : null;
@@ -30,12 +31,79 @@ class Dashboard extends StatefulWidget {
   State<Dashboard> createState() => _DashboardState();
 }
 
-class _DashboardState extends State<Dashboard> {
+class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   RuntimeSummary? summary;
   bool busy = false;
   String? error;
   DateTime? observed;
   int page = 0;
+  Timer? _monitorTimer;
+  bool monitoring = false;
+  int monitorSamples = 0;
+  String? monitorStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    _monitorTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed && monitoring) {
+      stopMonitoring('Monitoring stopped when window lost foreground.');
+    }
+  }
+
+  void stopMonitoring(String reason) {
+    _monitorTimer?.cancel();
+    _monitorTimer = null;
+    if (mounted) {
+      setState(() {
+        monitoring = false;
+        monitorStatus = reason;
+      });
+    }
+  }
+
+  Future<void> startMonitoring() async {
+    if (busy || monitoring || widget.source == null || page != 0) return;
+    setState(() {
+      monitoring = true;
+      monitorSamples = 0;
+      monitorStatus = 'Monitoring active · at most 10 observations';
+    });
+    await monitorOnce();
+  }
+
+  Future<void> monitorOnce() async {
+    if (!mounted || !monitoring || busy) return;
+    await refresh();
+    if (!mounted || !monitoring) return;
+    setState(() => monitorSamples++);
+    if (error != null || summary == null || summary!.recoveryRequired) {
+      stopMonitoring(
+          'Monitoring stopped: review runtime availability or recovery.');
+    } else if (monitorSamples >= 10) {
+      stopMonitoring('Monitoring complete: 10 observations.');
+    } else {
+      _monitorTimer = Timer(const Duration(seconds: 2), monitorOnce);
+    }
+  }
+
+  void selectPage(int value) {
+    if (value != 0 && monitoring) {
+      stopMonitoring('Monitoring stopped when leaving overview.');
+    }
+    setState(() => page = value);
+  }
 
   Future<void> refresh() async {
     if (busy || widget.source == null) return;
@@ -86,14 +154,26 @@ class _DashboardState extends State<Dashboard> {
         actions: [
           IconButton(
               tooltip: 'Refresh runtime summary',
-              onPressed: busy || widget.source == null ? null : refresh,
+              onPressed:
+                  busy || monitoring || widget.source == null ? null : refresh,
               icon: const Icon(Icons.refresh)),
+          IconButton(
+            tooltip: monitoring ? 'Stop monitoring' : 'Start monitoring',
+            onPressed: monitoring
+                ? () => stopMonitoring('Monitoring stopped by operator.')
+                : (busy || widget.source == null || page != 0
+                    ? null
+                    : startMonitoring),
+            icon: Icon(monitoring
+                ? Icons.stop_circle_outlined
+                : Icons.monitor_heart_outlined),
+          ),
           const SizedBox(width: 12),
         ],
       ),
       bottomNavigationBar: GoreeCloudFloatingNavigation(
         selectedIndex: page,
-        onDestinationSelected: (v) => setState(() => page = v),
+        onDestinationSelected: selectPage,
         destinations: const [
           NavigationDestination(
               icon: Icon(Icons.dashboard_outlined), label: 'Overview'),
@@ -119,6 +199,9 @@ class _DashboardState extends State<Dashboard> {
                 if (widget.source == null)
                   const Text(
                       'Start with a reviewed local CLI path, SHA-256 digest and private Unix socket. No runtime connected.'),
+                if (monitorStatus != null)
+                  Semantics(liveRegion: true, child: Text(monitorStatus!)),
+                if (monitoring) Text('Observations: $monitorSamples / 10'),
                 if (busy) const LinearProgressIndicator(),
                 if (error != null)
                   Semantics(
@@ -172,7 +255,9 @@ class _DashboardState extends State<Dashboard> {
                 }),
                 const SizedBox(height: 18),
                 FilledButton.icon(
-                    onPressed: busy || widget.source == null ? null : refresh,
+                    onPressed: busy || monitoring || widget.source == null
+                        ? null
+                        : refresh,
                     icon: const Icon(Icons.refresh),
                     label: const Text('Refresh locally')),
               ] else ...[
@@ -182,6 +267,7 @@ class _DashboardState extends State<Dashboard> {
                 for (final text in [
                   'No container identifiers, paths, PIDs or annotations displayed.',
                   'No remote network, analytics or credential discovery.',
+                  'Monitoring is explicitly started, bounded and stops on recovery or leaving the overview.',
                   'No deployment, mutation or automatic recovery.',
                   'Same-user Unix access is not GoreeCloud Identity authorization.',
                   'Runtime observations are not an atomic snapshot.',
