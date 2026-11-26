@@ -74,6 +74,8 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "wait":
 		return waitCommand(args[1:], out)
+	case "inventory":
+		return inventoryCommand(args[1:], out)
 	case "recovery-observe":
 		return recoveryObserve(args[1:], out)
 	case "oci":
@@ -222,14 +224,16 @@ Usage:
   gcontainers image discover-manifest HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
   gcontainers image fetch-blob EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
   gcontainers image pull-stage EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE PRIVATE_PARENT --experimental
+  gcontainers image prepare-bundle EXISTING_STORE MANIFEST_SHA SIZE CONFIG_FILE CONFIG_SHA ENTRYPOINT_SHA PRIVATE_PARENT --experimental
   gcontainers image assemble-manifest EXISTING_STORE SHA256 SIZE PRIVATE_PARENT --experimental
   gcontainers image assemble PRIVATE_PARENT (ABS_FILE tar|tar+gzip SHA256 SIZE){1,8} --experimental
   gcontainers volume create PRIVATE_STORE ID --experimental
   gcontainers volume inspect PRIVATE_STORE ID
   gcontainers volume count PRIVATE_STORE
-  gcontainers serve-local ABS_SOCKET --experimental
-  gcontainers local-query ABS_SOCKET health|journal
+  gcontainers serve-local ABS_SOCKET [--runtime runc|crun] --experimental
+  gcontainers local-query ABS_SOCKET health|journal|runtime-summary
   gcontainers wait runc|crun ID SECONDS
+  gcontainers inventory runc|crun
   gcontainers recovery-observe runc|crun ID
   gcontainers kernel-probe  # inert rootless namespace check, NOT OCI acceptance
   gcontainers image audit --store ABS_EXISTING_STORE_DIR
@@ -456,6 +460,9 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "prepare-bundle" {
+		return prepareImageBundle(args[1:], out)
+	}
 	if len(args) > 0 && args[0] == "pull-stage" {
 		return pullStage(args[1:], out)
 	}

@@ -65,6 +65,8 @@ for s in states:
     assert (cg/"pids.max").read_text().strip()=="32" and str(pid) in (cg/"cgroup.procs").read_text().split()
 print("TWO_GUEST_SIX_NAMESPACE_AND_CGROUP_PASS")
 PY
+ "$gc" inventory runc | python3 -c 'import json,sys;s=json.load(sys.stdin);assert s["running"]==2 and s["uncertain"]==0 and len(s["entries"])==2 and not s["atomicSnapshot"]'
+echo LIVE_RUNTIME_INVENTORY_PASS
 # Observers run concurrently with graceful termination; no forced signals.
 "$gc" wait runc worker-a 15 > "$workspace/worker-a-wait.json" & w1=$!
 "$gc" wait runc worker-b 15 > "$workspace/worker-b-wait.json" & w2=$!
@@ -89,4 +91,6 @@ for id in worker-a worker-b; do
 done
 "$gc" oci pending-summary | python3 -c 'import json,sys;assert json.load(sys.stdin)["pendingCount"]==0'
 trap - ERR
+"$gc" inventory runc | python3 -c 'import json,sys;s=json.load(sys.stdin);assert len(s["entries"])==0 and not s["recoveryRequired"]'
+echo EMPTY_RUNTIME_INVENTORY_PASS
 echo OCI_CONCURRENT_LIFECYCLE_PASS
