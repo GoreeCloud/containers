@@ -11,8 +11,8 @@ import (
 )
 
 func storeManifestAssembly(args []string, out io.Writer) error {
-	if len(args) != 5 || args[4] != "--experimental" {
-		return errors.New("usage: image assemble-manifest EXISTING_STORE SHA256 SIZE PRIVATE_PARENT --experimental")
+	if (len(args) != 5 || args[4] != "--experimental") && (len(args) != 6 || args[4] != "--whiteouts" || args[5] != "--experimental") {
+		return errors.New("usage: image assemble-manifest EXISTING_STORE SHA256 SIZE PRIVATE_PARENT [--whiteouts] --experimental")
 	}
 	n, e := strconv.ParseInt(args[2], 10, 64)
 	if e != nil || n <= 0 || strconv.FormatInt(n, 10) != args[2] {
@@ -24,7 +24,12 @@ func storeManifestAssembly(args []string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	r, e := s.AssembleManifest(ctx, args[1], n, args[3])
+	var r ociimage.StoreAssemblyReport
+	if len(args) == 6 {
+		r, e = s.AssembleManifestWithWhiteouts(ctx, args[1], n, args[3])
+	} else {
+		r, e = s.AssembleManifest(ctx, args[1], n, args[3])
+	}
 	if e != nil {
 		return e
 	}

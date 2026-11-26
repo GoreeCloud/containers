@@ -19,6 +19,7 @@ import (
 // Archive executable bits, owners, xattrs, links and whiteouts are not applied.
 // Never treat this directory as an admitted executable OCI rootfs.
 type StagedLayer struct {
+	WhiteoutsApplied         int         `json:"whiteoutsApplied,omitempty"`
 	Directory                string      `json:"directory"`
 	Layer                    LayerReport `json:"layer"`
 	DigestMatches            bool        `json:"digestMatches"`
@@ -47,6 +48,17 @@ type LayerInput struct {
 // Regular-file replacement is supported only within this fresh private tree.
 // Whiteouts, type changes and links remain prohibited; no executable rootfs.
 func StageLayers(ctx context.Context, layers []LayerInput, parent string) (report StagedLayer, err error) {
+	return stageLayers(ctx, layers, parent, false)
+}
+
+// StageLayersWithWhiteouts supports ordered OCI removal markers only for
+// seekable, digest-pinned input. It verifies each whole layer twice; all
+// effects are restricted to the newly allocated inert tree.
+func StageLayersWithWhiteouts(ctx context.Context, layers []LayerInput, parent string) (StagedLayer, error) {
+	return stageLayers(ctx, layers, parent, true)
+}
+func stageLayers(ctx context.Context, layers []LayerInput, parent string, whiteouts bool) (report StagedLayer, err error) {
+
 	if ctx == nil || len(layers) == 0 || len(layers) > 8 {
 		return report, errors.New("one to eight layers required")
 	}
@@ -116,6 +128,15 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 	}
 	defer root.Close()
 	dirs := map[string]bool{".": true}
+	dirIDs := map[string]os.FileInfo{".": stageInfo}
+	markerCount := 0
+	if whiteouts {
+		opened, e := root.Stat(".")
+		if e != nil || !os.SameFile(stageInfo, opened) {
+			return report, errors.New("staging root changed")
+		}
+	}
+
 	files := map[string]os.FileInfo{}
 	var mkdir func(string) error
 	mkdir = func(n string) error {
@@ -135,14 +156,36 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 			return e
 		}
 		dirs[n] = true
+		if whiteouts {
+			info, e := root.Lstat(n)
+			if e != nil || privateStoreInfo(info) != nil {
+				return errors.New("unsafe staged directory")
+			}
+			dirIDs[n] = info
+		}
 		return nil
 	}
 	var aggregate LayerReport
 	var payload int64
 	for _, l := range layers {
+		var marker func(string) error
+		if whiteouts {
+			markers, e := verifiedWhiteouts(ctx, l)
+			if e != nil {
+				return report, e
+			}
+			if len(markers) > MaxLayerEntries-markerCount {
+				return report, errors.New("aggregate whiteout quota exceeded")
+			}
+			if e = applyWhiteouts(ctx, root, dirs, dirIDs, files, markers); e != nil {
+				return report, e
+			}
+			markerCount += len(markers)
+			marker = func(n string) error { _, e := parseWhiteout(n); return e }
+		}
 		tracked := &trackedLayerReader{input: l.Reader, hash: sha256.New()}
 		decoded := sha256.New()
-		layer, e := inspectLayerDecoded(ctx, tracked, l.Media, func(n string, dir bool, length int64, r io.Reader) error {
+		layer, e := inspectLayerPolicy(ctx, tracked, l.Media, func(n string, dir bool, length int64, r io.Reader) error {
 			if dir {
 				if files[n] != nil {
 					return errors.New("layer type replacement unsupported")
@@ -164,7 +207,7 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 			}
 			return writeStagedFile(root, files, n, length, r)
 
-		}, decoded)
+		}, decoded, marker)
 		if e != nil {
 			return report, e
 		}
@@ -228,7 +271,7 @@ func StageLayers(ctx context.Context, layers []LayerInput, parent string) (repor
 		return report, e
 	}
 	committed = true
-	return StagedLayer{Directory: filepath.Join(parent, name), Layer: aggregate, DigestMatches: true, DescriptorSizeVerified: true}, nil
+	return StagedLayer{WhiteoutsApplied: markerCount, Directory: filepath.Join(parent, name), Layer: aggregate, DigestMatches: true, DescriptorSizeVerified: true}, nil
 }
 
 // Never truncate an existing inode: verify its identity and write an exclusive

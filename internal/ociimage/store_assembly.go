@@ -102,6 +102,13 @@ func configDiffIDs(raw []byte, layers int) (string, []string, error) {
 // every ordered compressed descriptor AND uncompressed diff ID in the same
 // staging pass. The result remains inert data, never an executable rootfs.
 func (s *Store) AssembleManifest(ctx context.Context, digest string, size int64, parent string) (StoreAssemblyReport, error) {
+	return s.assembleManifest(ctx, digest, size, parent, false)
+}
+func (s *Store) AssembleManifestWithWhiteouts(ctx context.Context, digest string, size int64, parent string) (StoreAssemblyReport, error) {
+	return s.assembleManifest(ctx, digest, size, parent, true)
+}
+func (s *Store) assembleManifest(ctx context.Context, digest string, size int64, parent string, whiteouts bool) (StoreAssemblyReport, error) {
+
 	var empty StoreAssemblyReport
 	if s == nil || ctx == nil {
 		return empty, errors.New("store and context required")
@@ -139,7 +146,7 @@ func (s *Store) AssembleManifest(ctx context.Context, digest string, size int64,
 		defer f.Close()
 		inputs = append(inputs, LayerInput{Reader: f, Media: d.MediaType, Digest: d.Digest, Size: d.Size, DiffID: ids[i]})
 	}
-	staged, e := StageLayers(ctx, inputs, parent)
+	staged, e := stageLayers(ctx, inputs, parent, whiteouts)
 	if e != nil {
 		return empty, e
 	}
