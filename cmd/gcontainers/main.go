@@ -93,6 +93,9 @@ func run(args []string, out io.Writer) error {
 	case "image":
 		return imageCommand(args[1:], out)
 	case "host":
+		if len(args) == 2 && args[1] == "helpers" {
+			return helperReadiness(args[2:], out)
+		}
 		if len(args) != 2 || args[1] != "inspect" {
 			return errors.New("usage: gcontainers host inspect")
 		}
@@ -260,6 +263,7 @@ Usage:
   gcontainers image stage-layer ABS_FILE tar|tar+gzip sha256:HEX DESCRIPTOR_BYTES PRIVATE_PARENT --experimental
   gcontainers image verify-layer ABS_TAR_FILE tar|tar+gzip sha256:EXPECTED_64_HEX [DESCRIPTOR_BYTES]
   gcontainers image import --store ABS_DIR --file ABS_BLOB --experimental
+  gcontainers host helpers
   gcontainers host inspect
   gcontainers stack observe SPEC runc|crun --expected-plan-sha256 DIGEST
   gcontainers stack instance-plan SPEC [--expected-plan-sha256 DIGEST]
