@@ -41,3 +41,13 @@ Tests verify raw/gzip layers, exact source index/manifest pins, whiteout replace
 ```sh
 bash scripts/layout-import-smoke.sh
 ```
+
+## Export a pinned manifest to a portable OCI layout
+
+```sh
+gcontainers image export-layout EXISTING_STORE MANIFEST_SHA SIZE PRIVATE_PARENT [--whiteouts] --experimental
+```
+
+Select one exact manifest, copy only the verified manifest/config/layer graph into a new random owner-private layout under an existing separate private parent. No source store mutation or tags, no network and no execution. Each copied blob is size/hash checked, each decoded layer DiffID and restricted archive framing is checked, and the complete layout is independently verified. The optional whiteout policy validates removal-marker syntax but does not apply overlay semantics at export. The index is generated deterministically for the selected manifest. Retain the returned index pin independently. Partial private output on an error is preserved for review; it is not a successful export. A failure before index publication leaves no index. A later verifier failure may leave a complete-looking but unaccepted directory. Never treat directory existence alone as success.
+
+Actual CLI test: import pinned raw/gzip whiteout layout, export the four selected blobs without the unrelated store seed, verify the portable layout, reimport into a distinct store and compare the final inert tree. Default whiteout rejection and wrong size tests passed. No source provenance, signature, general OCI compatibility or execution authorization.

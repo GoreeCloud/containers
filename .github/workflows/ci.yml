@@ -47,6 +47,8 @@ jobs:
         run: bash scripts/whiteout-smoke.sh
       - name: Verify local multi-platform index selection and assembly
         run: bash scripts/index-selection-smoke.sh
+      - name: Verify offline OCI import and export round trip
+        run: bash scripts/layout-import-smoke.sh
       - name: Vet
         run: go vet ./...
       - name: Build
