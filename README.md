@@ -170,3 +170,7 @@ The documentation baseline is MIT-licensed, with the notice Copyright (c) 2026 G
 ### Explicit non-root guest preview
 
 See [delegated guest profile](docs/DELEGATED-GUEST.md). The original create gate remains unchanged. The distinct delegated profile supports private snapshot and pinned image preparation, explicit runc create and actual first-party guest UID/GID 1000 lifecycle; no automatic Stack apply, host policy change or Stable authorization.
+
+### Explicit finite native Stack exercise
+
+See [Stack exercise](docs/STACK-EXERCISE.md) for the restricted, digest-pinned nonproduction controller. It starts concurrent dependency waves in a fresh private runtime, verifies delegated kernel evidence, and stops/deletes in reverse order. It does not provide general Stack apply, MIPS authorization, readiness or crash reconciliation.

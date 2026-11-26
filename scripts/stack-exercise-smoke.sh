@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Explicit first-party synthetic image, never production; no host allocation edits.
+set -euo pipefail
+umask 077
+[[ "$#" == 1 && "$1" == --execute && "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
+cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+printf '%s  %s\n' 50dcc0b257d724fe07f3852c2dda52340223f038227c7572644eec870741223e /usr/local/bin/runc | sha256sum -c -
+prepare="$(GC_SMOKE_RESOURCES=1 bash scripts/oci-smoke.sh --prepare-only)"
+workspace="$(printf '%s\n' "$prepare" | sed -n 's/^Private fixture directory: //p')"
+[[ "$workspace" =~ ^/tmp/gcontainers-smoke\.[A-Za-z0-9]+$ && -d "$workspace" && ! -L "$workspace" && "$(stat -c %u "$workspace")" == "$(id -u)" && "$(stat -c %a "$workspace")" == 700 ]]
+echo "Private stack fixture: $workspace"
+trap 'echo "Incomplete exercise: inspect $workspace; no forced cleanup" >&2' ERR
+export PATH=/usr/local/bin:/usr/bin:/bin
+export XDG_RUNTIME_DIR="$workspace/runtime"
+gc="$workspace/gcontainers"
+gcc -static -O2 -Wall -Wextra -Werror -DGC_GUEST_ID=1000 scripts/fixtures/oci-smoke-guest.c -o "$workspace/bundle/rootfs/bin/probe"
+mkdir -m 700 "$workspace/sessions"
+python3 - "$workspace" <<'PY'
+import io,tarfile,json,hashlib,pathlib,sys
+p=pathlib.Path(sys.argv[1]);exe=(p/"bundle/rootfs/bin/probe").read_bytes()
+def pin(b):return "sha256:"+hashlib.sha256(b).hexdigest()
+def desc(m,b):return {"mediaType":m,"digest":pin(b),"size":len(b)}
+out=io.BytesIO()
+with tarfile.open(fileobj=out,mode="w",format=tarfile.USTAR_FORMAT) as t:
+ i=tarfile.TarInfo("bin/probe");i.size=len(exe);i.mode=0o755;t.addfile(i,io.BytesIO(exe))
+layer=out.getvalue()
+c=json.dumps({"os":"linux","architecture":"amd64","rootfs":{"type":"layers","diff_ids":[pin(layer)]}}).encode()
+m=json.dumps({"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":desc("application/vnd.oci.image.config.v1+json",c),"layers":[desc("application/vnd.oci.image.layer.v1.tar",layer)]}).encode()
+for n,b in (("layer",layer),("imageconfig",c),("manifest",m)):(p/n).write_bytes(b)
+def service(n,replicas,dep):
+ return dict(name=n,image=pin(m),replicas=replicas,dependsOn=dep,resources=dict(cpuMilli=500,memoryBytes=67108864),security=dict(runAsNonRoot=True,readOnlyRootFilesystem=True,network="isolated"))
+json.dump(dict(apiVersion="goreecloud.containers/v1alpha1",kind="Stack",metadata=dict(name="synthetic"),services=[service("db",2,[]),service("api",1,["db"])]),open(p/"stack.json","w"))
+PY
+for n in layer imageconfig manifest;do "$gc" image import --store "$workspace/store" --file "$workspace/$n" --experimental >/dev/null;done
+"$gc" stack instance-plan "$workspace/stack.json" > "$workspace/plan.json"
+python3 - "$workspace" <<'PY'
+import json,os,pwd,sys,pathlib,hashlib,copy
+p=pathlib.Path(sys.argv[1]);plan=json.load(open(p/"plan.json"));config=json.load(open(p/"bundle/config.json"))
+name=pwd.getpwuid(os.getuid()).pw_name
+def allocation(f):
+ r=[(int(start),int(count)) for owner,start,count in (l.split(":") for l in pathlib.Path(f).read_text().splitlines()) if owner in (name,str(os.getuid())) and int(count)>=3]
+ assert len(r)==1 and r[0][0]>=65536
+ return r[0][0]
+u,g=allocation("/etc/subuid"),allocation("/etc/subgid")
+def pin(b):return "sha256:"+hashlib.sha256(b).hexdigest()
+entry=pin((p/"bundle/rootfs/bin/probe").read_bytes());size=(p/"manifest").stat().st_size
+instances=[]
+for n,i in enumerate(x for w in plan["startWaves"] for x in w["instances"]):
+ c=copy.deepcopy(config);c["process"]["user"]={"uid":1000,"gid":1000}
+ c["linux"]["uidMappings"].append(dict(containerID=1000,hostID=u+n,size=1))
+ c["linux"]["gidMappings"].append(dict(containerID=1000,hostID=g+n,size=1))
+ f=p/("config-"+str(n)+".json");raw=json.dumps(c).encode();f.write_bytes(raw)
+ instances.append(dict(id=i["id"],manifestSize=size,configFile=str(f),configSHA256=pin(raw),entrypointSHA256=entry,whiteouts=False))
+raw=json.dumps(dict(planSHA256=plan["planSHA256"],instances=instances)).encode();(p/"admission.json").write_bytes(raw);(p/"admission.pin").write_text(pin(raw))
+PY
+pin="$(cat "$workspace/admission.pin")"
+"$gc" stack review-exercise "$workspace/stack.json" "$workspace/admission.json" "$pin" | python3 -c 'import json,sys;r=json.load(sys.stdin);assert r["instances"]==3 and r["waves"]==2 and r["readOnly"] and not r["deploymentAuthorized"]'
+if "$gc" stack exercise "$workspace/stack.json" "$workspace/admission.json" "sha256:$(printf '%064d' 0)" "$workspace/store" "$workspace/sessions" --experimental;then exit 1;fi
+test -z "$(find "$workspace/sessions" -mindepth 1 -maxdepth 1 -print -quit)"
+"$gc" stack exercise "$workspace/stack.json" "$workspace/admission.json" "$pin" "$workspace/store" "$workspace/sessions" --experimental > "$workspace/exercise.json"
+python3 - "$workspace" <<'PY'
+import json,pathlib,sys
+p=pathlib.Path(sys.argv[1]);r=json.load(open(p/"exercise.json"));assert r["prepared"]==3 and r["completedWaves"]==2 and r["completedStopWaves"]==2 and r["allRunningObserved"] and r["allDelegatedEvidenceObserved"] and r["cleanupVerified"] and not r["recoveryReviewRequired"] and not r["deploymentAuthorized"]
+d=pathlib.Path(r["sessionDirectory"]);assert d.parent==p/"sessions"
+receipt=json.load(open(d/"receipt.json"));ids=receipt["runtimeIDs"];assert len(set(ids.values()))==3 and all(k!=v for k,v in ids.items())
+events=[json.loads(line) for line in (d/"events.ndjson").read_text().splitlines()]
+assert events[-1]["phase"]=="cleanup-verified" and len([x for x in events if x["phase"]=="running-observed"])==2
+root=d/"runtime/goreecloud-containers";assert sorted(x.name for x in root.iterdir())==["journal","locks"] and not list((root/"journal").iterdir())
+PY
+echo NATIVE_STACK_EXERCISE_PASS
