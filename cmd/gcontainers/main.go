@@ -223,7 +223,7 @@ Usage:
   gcontainers snapshot ABS_BUNDLE PRIVATE_PARENT --experimental
   gcontainers image discover-manifest HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
   gcontainers image fetch-blob EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
-  gcontainers image pull-stage EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE PRIVATE_PARENT --experimental
+  gcontainers image pull-stage EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE PRIVATE_PARENT [--bearer-file PRIVATE_TOKEN_FILE] --experimental
   gcontainers image assemble-manifest EXISTING_STORE SHA256 SIZE PRIVATE_PARENT --experimental
   gcontainers image assemble PRIVATE_PARENT (ABS_FILE tar|tar+gzip SHA256 SIZE){1,8} --experimental
   gcontainers volume create PRIVATE_STORE ID --experimental
