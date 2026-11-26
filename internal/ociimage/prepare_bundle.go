@@ -19,6 +19,7 @@ import (
 )
 
 type PreparedBundle struct {
+	DelegatedGuest           bool   `json:"delegatedGuest,omitempty"`
 	WhiteoutsApplied         int    `json:"whiteoutsApplied,omitempty"`
 	Directory                string `json:"directory"`
 	ManifestDigest           string `json:"manifestDigest"`
@@ -73,12 +74,18 @@ func pinnedLocalConfig(ctx context.Context, name, pin string) ([]byte, error) {
 // pinned image bytes and a separately reviewed local config and entrypoint
 // digest. It never interprets image configuration as runtime authorization.
 func (s *Store) PrepareBundle(ctx context.Context, digest string, size int64, config, configPin, entryPin, parent string) (report PreparedBundle, err error) {
-	return s.prepareBundle(ctx, digest, size, config, configPin, entryPin, parent, false)
+	return s.prepareBundle(ctx, digest, size, config, configPin, entryPin, parent, false, false)
 }
 func (s *Store) PrepareBundleWithWhiteouts(ctx context.Context, digest string, size int64, config, configPin, entryPin, parent string) (PreparedBundle, error) {
-	return s.prepareBundle(ctx, digest, size, config, configPin, entryPin, parent, true)
+	return s.prepareBundle(ctx, digest, size, config, configPin, entryPin, parent, true, false)
 }
-func (s *Store) prepareBundle(ctx context.Context, digest string, size int64, config, configPin, entryPin, parent string, whiteouts bool) (report PreparedBundle, err error) {
+
+// PrepareDelegatedBundle uses the same pinned static-image pipeline but a
+// separately selected guest mapping and guest-readable private rootfs.
+func (s *Store) PrepareDelegatedBundle(ctx context.Context, digest string, size int64, config, configPin, entryPin, parent string, whiteouts bool) (PreparedBundle, error) {
+	return s.prepareBundle(ctx, digest, size, config, configPin, entryPin, parent, whiteouts, true)
+}
+func (s *Store) prepareBundle(ctx context.Context, digest string, size int64, config, configPin, entryPin, parent string, whiteouts, delegated bool) (report PreparedBundle, err error) {
 
 	if ctx == nil || s == nil || os.Geteuid() == 0 || !digestPattern.MatchString(entryPin) {
 		return report, errors.New("nonroot pinned preparation required")
@@ -175,7 +182,11 @@ func (s *Store) prepareBundle(ctx context.Context, digest string, size int64, co
 	if spec.Root.Path != "rootfs" {
 		return report, errors.New("prepared configuration root must be rootfs")
 	}
-	if e = bundle.RequireSingleCallerMapping(spec, uint32(os.Geteuid()), uint32(os.Getegid())); e != nil {
+	if delegated {
+		if e = bundle.RequireDelegatedMapping(spec); e != nil {
+			return report, e
+		}
+	} else if e = bundle.RequireSingleCallerMapping(spec, uint32(os.Geteuid()), uint32(os.Getegid())); e != nil {
 		return report, e
 	}
 	if !bundle.HasExplicitGuestExecveAllowance(spec) {
@@ -238,6 +249,14 @@ func (s *Store) prepareBundle(ctx context.Context, digest string, size int64, co
 	if e = ef.Sync(); e != nil {
 		return report, e
 	}
+	if delegated {
+		if e = normalizeDelegatedStaging(ctx, guest, exe); e != nil {
+			return report, e
+		}
+		if e = bundle.ValidateDelegatedLayout(ctx, dir, spec); e != nil {
+			return report, e
+		}
+	}
 	if e = bundle.ValidateRuntimeLayout(dir, spec); e != nil {
 		return report, e
 	}
@@ -271,5 +290,5 @@ func (s *Store) prepareBundle(ctx context.Context, digest string, size int64, co
 		return report, e
 	}
 	keep = true
-	return PreparedBundle{WhiteoutsApplied: staged.WhiteoutsApplied, Directory: dir, ManifestDigest: digest, ConfigSHA256: configPin, EntrypointSHA256: entryPin, DiffIDsVerified: true, LayoutVerified: true}, nil
+	return PreparedBundle{DelegatedGuest: delegated, WhiteoutsApplied: staged.WhiteoutsApplied, Directory: dir, ManifestDigest: digest, ConfigSHA256: configPin, EntrypointSHA256: entryPin, DiffIDsVerified: true, LayoutVerified: true}, nil
 }

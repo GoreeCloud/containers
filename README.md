@@ -166,3 +166,7 @@ On a disposable Linux x86-64 test environment, run `scripts/oci-smoke.sh --prepa
 ## Licensing and provenance (source-admission review)
 
 The documentation baseline is MIT-licensed, with the notice Copyright (c) 2026 GoreeCloud. The development branch carries an MIT proposal with the notice Copyright (c) 2026 GoreeCloud contributors. The candidate preserves both existing notices without asserting a new grant, changing existing rights, or declaring the engine provenance gate complete. The review must confirm copyright authority, origin of source and any third-party obligations before promotion. No third-party runtime source is vendored in the reviewed candidate; external OCI specifications, `crun` and `runc` remain independently licensed. See [source admission review](docs/SOURCE-ADMISSION.md).
+
+### Explicit non-root guest preview
+
+See [delegated guest profile](docs/DELEGATED-GUEST.md). The original create gate remains unchanged. The distinct delegated profile supports private snapshot and pinned image preparation, explicit runc create and actual first-party guest UID/GID 1000 lifecycle; no automatic Stack apply, host policy change or Stable authorization.
