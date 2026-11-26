@@ -208,9 +208,24 @@ func ReadPendingMutation(ctx context.Context, stateRoot, id string) (PendingMuta
 		return empty, err
 	}
 	defer root.Close()
+	before, err := root.Lstat(".")
+	if err != nil {
+		return empty, err
+	}
+	journalBefore, err := root.Lstat("journal")
+	if err != nil {
+		return empty, err
+	}
+	verifyDirs := func() error { return verifyRuntimeDirectories(root, stateRoot, before, "journal", journalBefore) }
+	if err = verifyDirs(); err != nil {
+		return empty, err
+	}
 	name := "journal/" + id + ".pending"
 	info, err := root.Lstat(name)
 	if os.IsNotExist(err) {
+		if err = verifyDirs(); err != nil {
+			return empty, err
+		}
 		return PendingMutation{ID: id, ReadOnly: true}, nil
 	}
 	if err != nil {
@@ -256,6 +271,9 @@ func ReadPendingMutation(ctx context.Context, stateRoot, id string) (PendingMuta
 	}
 	if parsed.Version != 1 || parsed.ID != id || !journalOp(parsed.Operation) {
 		return empty, errors.New("inconsistent pending marker")
+	}
+	if err = verifyDirs(); err != nil {
+		return empty, err
 	}
 	return PendingMutation{ID: id, Operation: parsed.Operation, Pending: true, RecoveryRequired: true, ReadOnly: true}, nil
 }
