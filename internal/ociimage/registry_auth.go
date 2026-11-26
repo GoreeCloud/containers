@@ -125,6 +125,10 @@ func scopedClient(transport http.RoundTripper, origin, repo, digest, token strin
 // discovers, refreshes, forwards, or exchanges credentials; cache hits
 // do not establish that remote authentication took place.
 func (s *Store) PullAndStageAuthenticated(ctx context.Context, origin, repo, digest string, size int64, parent, tokenFile string) (PullStageReport, error) {
+	return s.PullAndStageAuthenticatedWithPolicy(ctx, origin, repo, digest, size, parent, tokenFile, false)
+}
+func (s *Store) PullAndStageAuthenticatedWithPolicy(ctx context.Context, origin, repo, digest string, size int64, parent, tokenFile string, whiteouts bool) (PullStageReport, error) {
+
 	var empty PullStageReport
 	if s == nil || ctx == nil {
 		return empty, errors.New("store and context required")
@@ -145,5 +149,5 @@ func (s *Store) PullAndStageAuthenticated(ctx context.Context, origin, repo, dig
 	if e != nil {
 		return empty, e
 	}
-	return s.pullAndStage(ctx, client, origin, repo, digest, size, parent)
+	return s.pullAndStagePolicy(ctx, client, origin, repo, digest, size, parent, whiteouts)
 }

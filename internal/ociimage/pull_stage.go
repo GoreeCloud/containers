@@ -22,12 +22,23 @@ type PullStageReport struct {
 // CAS objects may remain after a later error; no image tag or executable
 // image is published. It never sends credentials, resolves tags, or executes.
 func (s *Store) PullAndStage(ctx context.Context, origin, repo, digest string, size int64, parent string) (PullStageReport, error) {
+	return s.PullAndStageWithPolicy(ctx, origin, repo, digest, size, parent, false)
+}
+
+// PullAndStageWithPolicy retains all pinned registry controls; whiteouts are
+// an explicit inert overlay policy, not permission to execute an image.
+func (s *Store) PullAndStageWithPolicy(ctx context.Context, origin, repo, digest string, size int64, parent string, whiteouts bool) (PullStageReport, error) {
+
 	tr := &http.Transport{DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 10 * time.Second, DisableCompression: true, DisableKeepAlives: true, MaxResponseHeaderBytes: 32 << 10}
 	defer tr.CloseIdleConnections()
 	c := &http.Client{Transport: tr, Timeout: 60 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return s.pullAndStage(ctx, c, origin, repo, digest, size, parent)
+	return s.pullAndStagePolicy(ctx, c, origin, repo, digest, size, parent, whiteouts)
 }
 func (s *Store) pullAndStage(ctx context.Context, c *http.Client, origin, repo, digest string, size int64, parent string) (PullStageReport, error) {
+	return s.pullAndStagePolicy(ctx, c, origin, repo, digest, size, parent, false)
+}
+func (s *Store) pullAndStagePolicy(ctx context.Context, c *http.Client, origin, repo, digest string, size int64, parent string, whiteouts bool) (PullStageReport, error) {
+
 	var empty PullStageReport
 	if s == nil || ctx == nil {
 		return empty, errors.New("store and context required")
@@ -134,7 +145,7 @@ func (s *Store) pullAndStage(ctx context.Context, c *http.Client, origin, repo, 
 		}
 		seen[d.Digest] = true
 	}
-	staged, e := s.AssembleManifest(ctx, digest, size, parent)
+	staged, e := s.assembleManifest(ctx, digest, size, parent, whiteouts)
 	if e != nil {
 		return empty, e
 	}
