@@ -5,3 +5,5 @@
 ## Runtime plan observation
 
 gcontainers stack observe SPEC runc|crun --expected-plan-sha256 DIGEST recomputes the exact reviewed plan and correlates deterministic instance IDs with bounded live inventory. Per-instance missing/created/running/stopped/uncertain and dependency running counts are advisory; unrelated IDs are counted but not emitted. A pending operation is always uncertain, even if runtime reports running. A match does not establish workload ownership, image digest, guest identity or health. No create/start/restart/delete, no auto-reconciliation or authorization. Global recovery returns nonzero. Synthetic tests verify no unrelated names or secret references escape.
+
+The explicit laptop fixture scripts/stack-observe-smoke.sh --execute exercises live matching ID and missing dependency/service observations before and after a reviewed first-party guest lifecycle. This is deliberately not native Stack apply: the guest image and UID policy are not the declared stack identity. Wrong plan pins are refused.
