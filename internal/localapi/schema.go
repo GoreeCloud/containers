@@ -16,6 +16,19 @@ type healthResponse struct {
 	DeploymentAuthorized        bool   `json:"deploymentAuthorized"`
 }
 
+type runtimeSummary struct {
+	ReadOnly                    bool `json:"readOnly"`
+	Total                       int  `json:"total"`
+	Running                     int  `json:"running"`
+	Created                     int  `json:"created"`
+	Stopped                     int  `json:"stopped"`
+	Uncertain                   int  `json:"uncertain"`
+	RecoveryRequired            bool `json:"recoveryRequired"`
+	AtomicSnapshot              bool `json:"atomicSnapshot"`
+	IdentityIntegrationVerified bool `json:"identityIntegrationVerified"`
+	DeploymentAuthorized        bool `json:"deploymentAuthorized"`
+}
+
 func validateResponse(data []byte, endpoint string, status int) (json.RawMessage, error) {
 	// Reject duplicate, case-folded and unknown keys, missing fields and
 	// non-scalar values before typed decoding. Never echo raw peer JSON.
@@ -72,6 +85,29 @@ func validateResponse(data []byte, endpoint string, status int) (json.RawMessage
 			return nil, errors.New("unexpected local API health policy")
 		}
 		return json.Marshal(r)
+	}
+	if endpoint == "runtime-summary" {
+		var r runtimeSummary
+		if e = decode(&r, "readOnly", "total", "running", "created", "stopped", "uncertain", "recoveryRequired", "atomicSnapshot", "identityIntegrationVerified", "deploymentAuthorized"); e != nil {
+			return nil, e
+		}
+		if !r.ReadOnly || r.AtomicSnapshot || r.IdentityIntegrationVerified || r.DeploymentAuthorized || r.Total < 0 || r.Total > 128 || r.RecoveryRequired != (r.Uncertain > 0) || r.RecoveryRequired != (status == 409) {
+			return nil, errors.New("invalid runtime summary policy")
+		}
+		total := 0
+		for _, n := range []int{r.Running, r.Created, r.Stopped, r.Uncertain} {
+			if n < 0 || n > r.Total {
+				return nil, errors.New("invalid runtime summary count")
+			}
+			total += n
+		}
+		if total != r.Total {
+			return nil, errors.New("inconsistent runtime counters")
+		}
+		return json.Marshal(r)
+	}
+	if endpoint != "journal" {
+		return nil, errors.New("unsupported response endpoint")
 	}
 	var r engine.JournalCensus
 	if e = decode(&r, "readOnly", "pendingCount", "pendingCreate", "pendingStart", "pendingStop", "pendingDelete", "recoveryRequired", "runtimeStateVerified"); e != nil {

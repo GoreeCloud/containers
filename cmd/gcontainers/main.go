@@ -74,6 +74,8 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "wait":
 		return waitCommand(args[1:], out)
+	case "inventory":
+		return inventoryCommand(args[1:], out)
 	case "recovery-observe":
 		return recoveryObserve(args[1:], out)
 	case "oci":
@@ -227,9 +229,10 @@ Usage:
   gcontainers volume create PRIVATE_STORE ID --experimental
   gcontainers volume inspect PRIVATE_STORE ID
   gcontainers volume count PRIVATE_STORE
-  gcontainers serve-local ABS_SOCKET --experimental
-  gcontainers local-query ABS_SOCKET health|journal
+  gcontainers serve-local ABS_SOCKET [--runtime runc|crun] --experimental
+  gcontainers local-query ABS_SOCKET health|journal|runtime-summary
   gcontainers wait runc|crun ID SECONDS
+  gcontainers inventory runc|crun
   gcontainers recovery-observe runc|crun ID
   gcontainers kernel-probe  # inert rootless namespace check, NOT OCI acceptance
   gcontainers image audit --store ABS_EXISTING_STORE_DIR
