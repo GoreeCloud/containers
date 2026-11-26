@@ -161,7 +161,7 @@ func New(binary, stateRoot string, runner Runner) (*Engine, error) {
 	return &Engine{Binary: binary, StateRoot: stateRoot, Runner: runner, lockMutations: useLocks}, nil
 }
 func ValidateID(id string) error {
-	if !idPattern.MatchString(id) {
+	if id == "locks" || id == "journal" || !idPattern.MatchString(id) {
 		return errors.New("invalid container ID (lowercase 1-63 chars, starting with a letter)")
 	}
 	return nil
@@ -181,6 +181,17 @@ func (e *Engine) callWithResources(ctx context.Context, resources *bundle.Resour
 			id = args[len(args)-1]
 		}
 		return RunJournaledMutation(ctx, e.StateRoot, id, op, func() ([]byte, error) {
+			var deletionRoot *os.Root
+			var deletionIdentity os.FileInfo
+			if op == "delete" {
+				var err error
+				deletionRoot, deletionIdentity, err = captureDeleteRoot(e.StateRoot, id)
+				if err != nil {
+					return nil, err
+				}
+				defer deletionRoot.Close()
+			}
+
 			result, err := e.Runner.Run(ctx, e.Binary, argv...)
 			if err != nil {
 				return nil, err
@@ -217,6 +228,11 @@ func (e *Engine) callWithResources(ctx context.Context, resources *bundle.Resour
 				state, err := e.readState(ctx, id)
 				if err != nil || state.Status != "running" || state.PID <= 0 {
 					return nil, errors.New("post-start running state not verified")
+				}
+			}
+			if op == "delete" {
+				if err := verifyDeleteAbsent(ctx, deletionRoot, deletionIdentity, e.StateRoot, id); err != nil {
+					return nil, err
 				}
 			}
 			if op == "kill" {
