@@ -74,6 +74,8 @@ func run(args []string, out io.Writer) error {
 		return err
 	case "wait":
 		return waitCommand(args[1:], out)
+	case "watch":
+		return watchCommand(args[1:], out)
 	case "inventory":
 		return inventoryCommand(args[1:], out)
 	case "recovery-observe":
@@ -237,6 +239,7 @@ Usage:
   gcontainers serve-local ABS_SOCKET [--runtime runc|crun] --experimental
   gcontainers local-query ABS_SOCKET health|journal|runtime-summary
   gcontainers wait runc|crun ID SECONDS
+  gcontainers watch runc|crun SAMPLES INTERVAL_SECONDS
   gcontainers inventory runc|crun
   gcontainers recovery-observe runc|crun ID
   gcontainers kernel-probe  # inert rootless namespace check, NOT OCI acceptance

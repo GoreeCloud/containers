@@ -67,6 +67,8 @@ print("TWO_GUEST_SIX_NAMESPACE_AND_CGROUP_PASS")
 PY
  "$gc" inventory runc | python3 -c 'import json,sys;s=json.load(sys.stdin);assert s["running"]==2 and s["uncertain"]==0 and len(s["entries"])==2 and not s["atomicSnapshot"]'
 echo LIVE_RUNTIME_INVENTORY_PASS
+"$gc" watch runc 2 1 | python3 -c 'import json,sys;s=[json.loads(l) for l in sys.stdin];assert len(s)==2 and all(x["running"]==2 and x["total"]==2 and not x["recoveryRequired"] and not x["autoRepair"] for x in s)'
+echo LIVE_RUNTIME_WATCH_PASS
 # Observers run concurrently with graceful termination; no forced signals.
 "$gc" wait runc worker-a 15 > "$workspace/worker-a-wait.json" & w1=$!
 "$gc" wait runc worker-b 15 > "$workspace/worker-b-wait.json" & w2=$!
