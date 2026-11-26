@@ -223,6 +223,7 @@ func usage(w io.Writer) error {
 Usage:
   gcontainers doctor
   gcontainers snapshot ABS_BUNDLE PRIVATE_PARENT --experimental
+  gcontainers image select-index EXISTING_STORE INDEX_SHA SIZE amd64|arm64
   gcontainers image discover-manifest HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
   gcontainers image fetch-blob EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE --experimental
   gcontainers image pull-stage EXISTING_STORE HTTPS_ORIGIN REPOSITORY SHA256 SIZE PRIVATE_PARENT [--bearer-file PRIVATE_TOKEN_FILE] --experimental
@@ -466,6 +467,9 @@ func oci(args []string, w io.Writer) error {
 }
 
 func imageCommand(args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "select-index" {
+		return selectImageIndex(args[1:], out)
+	}
 	if len(args) > 0 && args[0] == "prepare-bundle" {
 		return prepareImageBundle(args[1:], out)
 	}
