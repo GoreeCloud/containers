@@ -36,6 +36,10 @@ func DiscoverManifest(ctx context.Context, origin, repo, digest string, size int
 	return discoverManifest(ctx, &http.Client{Transport: tr, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, origin, repo, digest, size)
 }
 func discoverManifest(ctx context.Context, c *http.Client, origin, repo, digest string, size int64) (ManifestDiscovery, error) {
+	return discoverManifestWithBytes(ctx, c, origin, repo, digest, size, nil)
+}
+func discoverManifestWithBytes(ctx context.Context, c *http.Client, origin, repo, digest string, size int64, admit func([]byte, ManifestDiscovery) error) (ManifestDiscovery, error) {
+
 	var empty ManifestDiscovery
 	if ctx == nil || size <= 0 || size > maxMetadataBytes {
 		return empty, errors.New("invalid pinned manifest size")
@@ -79,7 +83,16 @@ func discoverManifest(ctx context.Context, c *http.Client, origin, repo, digest 
 	if e = ctx.Err(); e != nil {
 		return empty, e
 	}
-	return parsePinnedManifest(raw, digest, size)
+	result, e := parsePinnedManifest(raw, digest, size)
+	if e != nil {
+		return empty, e
+	}
+	if admit != nil {
+		if e = admit(raw, result); e != nil {
+			return empty, e
+		}
+	}
+	return result, nil
 }
 func parsePinnedManifest(raw []byte, digest string, size int64) (ManifestDiscovery, error) {
 	var empty ManifestDiscovery
