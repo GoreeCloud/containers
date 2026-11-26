@@ -19,7 +19,7 @@ func Query(ctx context.Context, socket, endpoint string) (json.RawMessage, int, 
 	if ctx == nil || os.Geteuid() == 0 || !filepath.IsAbs(socket) || filepath.Clean(socket) != socket {
 		return nil, 0, errors.New("private absolute local socket required")
 	}
-	if endpoint != "health" && endpoint != "journal" {
+	if endpoint != "health" && endpoint != "journal" && endpoint != "runtime-summary" {
 		return nil, 0, errors.New("unsupported API endpoint")
 	}
 	parent := filepath.Dir(socket)
@@ -79,7 +79,7 @@ func Query(ctx context.Context, socket, endpoint string) (json.RawMessage, int, 
 		return nil, 0, errors.New("local API unavailable")
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 && !(endpoint == "journal" && resp.StatusCode == 409) {
+	if resp.StatusCode != 200 && !((endpoint == "journal" || endpoint == "runtime-summary") && resp.StatusCode == 409) {
 		return nil, resp.StatusCode, errors.New("local API refused request")
 	}
 	b, e := io.ReadAll(io.LimitReader(resp.Body, 16385))

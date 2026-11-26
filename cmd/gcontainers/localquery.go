@@ -11,7 +11,7 @@ import (
 
 func localQuery(args []string, out io.Writer) error {
 	if len(args) != 2 {
-		return errors.New("usage: local-query ABS_SOCKET health|journal")
+		return errors.New("usage: local-query ABS_SOCKET health|journal|runtime-summary")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()

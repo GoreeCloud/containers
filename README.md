@@ -121,8 +121,9 @@ Running an experimental rootless bundle also requires a maintained `crun` or `ru
 - [Content-store manifest assembly](docs/STORE-ASSEMBLY.md): verifies pinned manifest, config, compressed descriptors and ordered uncompressed diff IDs in inert staging.
 - [Ordered inert layer assembly](docs/ASSEMBLY-PREVIEW.md): up to eight pinned layers; no whiteouts, links, executable permissions or full OCI semantics.
 - [Private volume directories](docs/VOLUME-PREVIEW.md): exclusive creation, cooperative maximum 1,024 directories, aggregate inventory and bounded pinned offline backup/restore; no mounting, live application consistency, byte quota or deletion.
-- [Local API](docs/LOCAL-API.md) and [client](docs/LOCAL-CLIENT.md): private same-UID Unix socket, read-only health and journal, no TCP or MIPS identity grant.
+- [Local API](docs/LOCAL-API.md) and [client](docs/LOCAL-CLIENT.md): private same-UID Unix socket, read-only health, journal and opt-in redacted runtime counts, no TCP or MIPS identity grant.
 - [Bounded lifecycle wait](docs/WAIT-PREVIEW.md): read-only stopped-state observation with pending-journal refusal; no exit code or instance identity guarantee.
+- [Runtime inventory](docs/RUNTIME-INVENTORY.md): bounded private runtime metadata and pending-operation inventory, with per-ID observations and no repair.
 - [Recovery observation](docs/RECOVERY-OBSERVATION.md), [start evidence](docs/START-EVIDENCE.md) and [stop evidence](docs/STOP-EVIDENCE.md): preserve uncertain journals and reject in-place marker changes with Linux change-time evidence; no automatic repair or forced escalation.
 
 ## Native replica orchestration planning
