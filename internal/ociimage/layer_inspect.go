@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"path"
 	"strings"
@@ -35,6 +36,9 @@ func InspectLayer(ctx context.Context, input io.Reader, mediaType string) (Layer
 // A consumer receives only validated entries; the outer operation must discard
 // all staging if any later archive framing, digest, or descriptor check fails.
 func inspectLayer(ctx context.Context, input io.Reader, mediaType string, consume func(string, bool, int64, io.Reader) error) (LayerReport, error) {
+	return inspectLayerDecoded(ctx, input, mediaType, consume, nil)
+}
+func inspectLayerDecoded(ctx context.Context, input io.Reader, mediaType string, consume func(string, bool, int64, io.Reader) error, decodedHash hash.Hash) (LayerReport, error) {
 	var empty LayerReport
 	if ctx == nil || input == nil {
 		return empty, errors.New("layer inspection requires context and input")
@@ -60,6 +64,9 @@ func inspectLayer(ctx context.Context, input io.Reader, mediaType string, consum
 		decoder.Multistream(false)
 		defer decoder.Close()
 		decoded = decoder
+	}
+	if decodedHash != nil {
+		decoded = io.TeeReader(decoded, decodedHash)
 	}
 	framing := &layerContextReader{ctx: ctx, reader: decoded}
 	reader := tar.NewReader(framing)
