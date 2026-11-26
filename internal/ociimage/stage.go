@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"syscall"
 )
 
 // StagedLayer is inert, private data from one strictly verified layer.
@@ -29,9 +30,29 @@ type StagedLayer struct {
 // directory is replaced. Failure removes only the newly created staging tree.
 // This is not protection against hostile same-UID processes or hard disk quota.
 func StageLayer(ctx context.Context, input io.Reader, media, digest string, size int64, parent string) (report StagedLayer, err error) {
-	if ctx == nil || input == nil || !digestPattern.MatchString(digest) || size <= 0 || size > MaxLayerCompressedBytes {
-		return report, errors.New("invalid staging descriptor")
+	return StageLayers(ctx, []LayerInput{{Reader: input, Media: media, Digest: digest, Size: size}}, parent)
+}
+
+type LayerInput struct {
+	Reader io.Reader
+	Media  string
+	Digest string
+	Size   int64
+}
+
+// StageLayers builds an inert ordered overlay from at most eight pinned layers.
+// Regular-file replacement is supported only within this fresh private tree.
+// Whiteouts, type changes and links remain prohibited; no executable rootfs.
+func StageLayers(ctx context.Context, layers []LayerInput, parent string) (report StagedLayer, err error) {
+	if ctx == nil || len(layers) == 0 || len(layers) > 8 {
+		return report, errors.New("one to eight layers required")
 	}
+	for _, l := range layers {
+		if l.Reader == nil || !digestPattern.MatchString(l.Digest) || l.Size <= 0 || l.Size > MaxLayerCompressedBytes {
+			return report, errors.New("invalid layer descriptor")
+		}
+	}
+
 	if err = ctx.Err(); err != nil {
 		return report, err
 	}
@@ -112,32 +133,66 @@ func StageLayer(ctx context.Context, input io.Reader, media, digest string, size
 		dirs[n] = true
 		return nil
 	}
-	tracked := &trackedLayerReader{input: input, hash: sha256.New()}
-	layer, e := inspectLayer(ctx, tracked, media, func(n string, dir bool, length int64, r io.Reader) error {
-		if dir {
-			return mkdir(n)
-		}
-		if e := mkdir(path.Dir(n)); e != nil {
-			return e
-		}
-		f, e := root.OpenFile(n, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	var aggregate LayerReport
+	files := map[string]bool{}
+	var payload int64
+	for _, l := range layers {
+		tracked := &trackedLayerReader{input: l.Reader, hash: sha256.New()}
+		layer, e := inspectLayer(ctx, tracked, l.Media, func(n string, dir bool, length int64, r io.Reader) error {
+			if dir {
+				if files[n] {
+					return errors.New("layer type replacement unsupported")
+				}
+				return mkdir(n)
+			}
+			if e := mkdir(path.Dir(n)); e != nil {
+				return e
+			}
+			if dirs[n] {
+				return errors.New("layer type replacement unsupported")
+			}
+			if length > MaxLayerUnpackedBytes-payload {
+				return errors.New("aggregate layer payload quota exceeded")
+			}
+			payload += length
+			if len(files)+len(dirs) >= MaxLayerEntries && !files[n] {
+				return errors.New("aggregate layer entry quota exceeded")
+			}
+			flags := os.O_CREATE | os.O_EXCL | os.O_WRONLY
+			if files[n] {
+				info, e := root.Lstat(n)
+				if e != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
+					return errors.New("unsafe staged replacement")
+				}
+				// All files belong to this newly created unpublished tree.
+				flags = os.O_TRUNC | os.O_WRONLY
+			}
+			f, e := root.OpenFile(n, flags|syscall.O_NOFOLLOW, 0600)
+			files[n] = true
+			if e != nil {
+				return e
+			}
+			written, e := io.CopyN(f, r, length)
+			if e == nil && written != length {
+				e = io.ErrUnexpectedEOF
+			}
+			if e == nil {
+				e = f.Sync()
+			}
+			return errors.Join(e, f.Close())
+		})
 		if e != nil {
-			return e
+			return report, e
 		}
-		written, e := io.CopyN(f, r, length)
-		if e == nil && written != length {
-			e = io.ErrUnexpectedEOF
+		if tracked.bytes != l.Size || "sha256:"+hex.EncodeToString(tracked.hash.Sum(nil)) != l.Digest {
+			return report, errors.New("staged OCI layer descriptor mismatch")
 		}
-		if e == nil {
-			e = f.Sync()
+		aggregate.FileCount += layer.FileCount
+		aggregate.DirectoryCount += layer.DirectoryCount
+		aggregate.UnpackedBytes += layer.UnpackedBytes
+		if aggregate.FileCount+aggregate.DirectoryCount > MaxLayerEntries || len(files)+len(dirs) > MaxLayerEntries {
+			return report, errors.New("aggregate layer entry quota exceeded")
 		}
-		return errors.Join(e, f.Close())
-	})
-	if e != nil {
-		return report, e
-	}
-	if tracked.bytes != size || "sha256:"+hex.EncodeToString(tracked.hash.Sum(nil)) != digest {
-		return report, errors.New("staged OCI layer descriptor mismatch")
 	}
 	if e = ctx.Err(); e != nil {
 		return report, e
@@ -151,5 +206,5 @@ func StageLayer(ctx context.Context, input io.Reader, media, digest string, size
 		return report, errors.New("staging identity changed before completion")
 	}
 	committed = true
-	return StagedLayer{Directory: filepath.Join(parent, name), Layer: layer, DigestMatches: true, DescriptorSizeVerified: true}, nil
+	return StagedLayer{Directory: filepath.Join(parent, name), Layer: aggregate, DigestMatches: true, DescriptorSizeVerified: true}, nil
 }
