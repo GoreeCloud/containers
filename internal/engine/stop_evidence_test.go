@@ -53,7 +53,14 @@ func TestStopEvidenceJournal(t *testing.T) {
 				t.Fatal(err)
 			}
 			e.lockMutations = true
-			ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+			// Positive completion tests should not depend on filesystem fsync
+			// and scheduler latency under parallel race-instrumented CI.
+			// The production wait remains bounded to three seconds.
+			deadline := 10 * time.Second
+			if post == "running" {
+				deadline = 1500 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), deadline)
 			defer cancel()
 			err = e.Stop(ctx, "worker")
 			if post == "stopped" {
